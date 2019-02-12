@@ -13,3 +13,16 @@ output:
     toc_float: yes
 ---
 
+
+# loading in the libraries
+```{r}
+library(tidyverse)
+```
+
+# reading in the data
+
+```{r}
+LOAD = read.csv("LOAD.csv")
+PRICE = read.csv("PRICE.csv")
+WEATHER = read.csv("WEATHER.csv")
+```

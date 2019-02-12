@@ -13,11 +13,10 @@ output:
     toc_float: yes
 ---
 
-
 # loading in the libraries
 ```{r}
 library(tidyverse)
-library            # useful for sumarizing information
+library(skimr)            # useful for sumarizing information
 library(lubridate) # useful for manipulating datetime information
 ```
 

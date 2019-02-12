@@ -62,6 +62,29 @@ skim(innerDat)
 
 This dataset lacks the missing values of the previous one
 
+# combinig the load variable with the various price components to get an aggregate value
+
+```{r}
+innerDat$LOAD = as.numeric(innerDat$LOAD)
+leftDat$LOAD = as.numeric(leftDat$LOAD)
+
+innerDat$TotalLMBP = innerDat$LOAD * innerDat$LMBP
+leftDat$TotalLMBP = leftDat$LOAD * leftDat$LMBP
+
+innerDat$CostCongestion = innerDat$LOAD * innerDat$MCC
+leftDat$CostCongestion = leftDat$LOAD * leftDat$MCC
+
+innerDat$CostLosses = innerDat$LOAD * innerDat$MCL
+leftDat$CostLosses = leftDat$LOAD * leftDat$MCL
+
+innerDat$TotalSystemEnergy = innerDat$TotalLMBP - innerDat$CostCongestion - innerDat$CostLosses
+leftDat$TotalSystemEnergy = leftDat$TotalLMBP - leftDat$CostCongestion - leftDat$CostLosses
+
+innerDat$SystemEnergyPrice = innerDat$TotalSystemEnergy / innerDat$LOAD
+leftDat$SystemEnergyPrice = leftDat$TotalSystemEnergy / leftDat$LOAD
+```
+
+
 # Handling the weather data
 
 in weather.csv we have two types of values, forecasted and actual. if VINTACE == Actual, then the data is the recorded observations for that day--otherwise the data is a forecast performed on the vintage day predicting weather conditions for the forecast_day. These forecasts/observations are made at each of the weather stations, and covers a range from march 1, 2011 to dec 16, 2018.

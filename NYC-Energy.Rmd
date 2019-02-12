@@ -17,6 +17,8 @@ output:
 # loading in the libraries
 ```{r}
 library(tidyverse)
+library            # useful for sumarizing information
+library(lubridate) # useful for manipulating datetime information
 ```
 
 # reading in the data
@@ -26,3 +28,54 @@ LOAD = read.csv("LOAD.csv")
 PRICE = read.csv("PRICE.csv")
 WEATHER = read.csv("WEATHER.csv")
 ```
+
+# summarizing the data
+
+```{r}
+skim(LOAD)
+skim(PRICE)
+skim(WEATHER)
+```
+
+No missing values for the LOAD dataset, PRICE dataset, and WEATHER dataset, which is good for us
+
+# combining the load and price on the date/time attribute (may introduce NAs through left joining)
+
+```{r}
+leftDat = LOAD %>% 
+  left_join(PRICE)
+skim(leftDat)
+```
+
+left joining introduces 3828 missing values due to the difference between price and load date ranges, where price ranges from 11/1/2011 to 11/30/2018 while load ranges from 11/1/2011 to 12/15/2018. 
+
+There is also a discrepency between the number of ZONES, where the PRICE datasheet has 11 ZONES when compared to LOAD which has 15 ZONES
+
+# Using inner join
+
+by using an inner join, we can preven the NAs by only focusing on shared keys across both dataframes, this will remove information regarding the additional dates (12/1/2018-12/15/2018) and the extra 4 zones that are not included in the PRICE datasheet
+
+```{r}
+innerDat = LOAD %>% 
+  inner_join(PRICE)
+skim(innerDat)
+```
+
+This dataset lacks the missing values of the previous one
+
+# Handling the weather data
+
+in weather.csv we have two types of values, forecasted and actual. if VINTACE == Actual, then the data is the recorded observations for that day--otherwise the data is a forecast performed on the vintage day predicting weather conditions for the forecast_day. These forecasts/observations are made at each of the weather stations, and covers a range from march 1, 2011 to dec 16, 2018.
+
+Let's split the weather into forecasts and actuals
+
+```{r}
+actuals = WEATHER %>% 
+  filter(VINTAGE == 'Actual')
+forecasts = WEATHER %>% 
+  filter(VINTAGE == 'Forecast')
+skim(actuals)
+skim(forecasts)
+```
+
+

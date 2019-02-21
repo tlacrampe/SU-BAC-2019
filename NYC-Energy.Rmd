@@ -84,7 +84,6 @@ innerDat$SystemEnergyPrice = innerDat$TotalSystemEnergy / innerDat$LOAD
 leftDat$SystemEnergyPrice = leftDat$TotalSystemEnergy / leftDat$LOAD
 ```
 
-
 # Handling the weather data
 
 in weather.csv we have two types of values, forecasted and actual. if VINTACE == Actual, then the data is the recorded observations for that day--otherwise the data is a forecast performed on the vintage day predicting weather conditions for the forecast_day. These forecasts/observations are made at each of the weather stations, and covers a range from march 1, 2011 to dec 16, 2018.
@@ -99,5 +98,3 @@ forecasts = WEATHER %>%
 skim(actuals)
 skim(forecasts)
 ```
-
-

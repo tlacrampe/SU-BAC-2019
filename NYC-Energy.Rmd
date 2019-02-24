@@ -98,3 +98,35 @@ forecasts = WEATHER %>%
 skim(actuals)
 skim(forecasts)
 ```
+
+
+Next let's begin assessing the accuracy of the forecasts
+
+```{r}
+actuals$FORECAST_DATE = NULL
+actuals$VINTAGE = NULL
+names(actuals)[3] = 'actual_MAX_TEMP'
+names(actuals)[4] = 'actual_MIN_TEMP'
+names(actuals)[5] = 'actual_MAX_WET_BULB'
+names(actuals)[6] = 'actual_MIN_WET_BULB'
+
+forecastsWithActuals = forecasts %>% 
+  left_join(actuals, by = c('VINTAGE_DATE' = 'VINTAGE_DATE', 'STATION_ID' = 'STATION_ID'))
+
+skim(forecastsWithActuals)
+
+missingActuals = forecastsWithActuals %>% 
+  filter(is.na(actual_MAX_TEMP))
+
+forecastsWithActuals = na.omit(forecastsWithActuals) # removes the NA values
+
+forecastsWithActuals$dateDif = mdy(forecastsWithActuals$VINTAGE_DATE) - mdy(forecastsWithActuals$FORECAST_DATE) # calculates days-out form forecast
+skim(as.numeric(forecastsWithActuals$dateDif))
+
+forecastsWithActuals$lowerDif = forecastsWithActuals$actual_MIN_TEMP - forecastsWithActuals$MIN_TEMP
+skim(forecastsWithActuals$lowerDif)
+
+forecastsWithActuals$upperDif = forecastsWithActuals$actual_MAX_TEMP - forecastsWithActuals$MAX_TEMP
+skim(forecastsWithActuals$upperDif)
+```
+

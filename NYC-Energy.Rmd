@@ -84,6 +84,15 @@ innerDat$SystemEnergyPrice = innerDat$TotalSystemEnergy / innerDat$LOAD
 leftDat$SystemEnergyPrice = leftDat$TotalSystemEnergy / leftDat$LOAD
 ```
 
+
+# Adding information on the sites using information from 2017 from the additional excel sheet
+
+```{r}
+generating_facilities = read.csv('2017_Generating_Facilities.csv')
+innerDat %>% 
+  inner_join(generating_facilities) # turns out there are no matching values :,(
+```
+
 # Handling the weather data
 
 in weather.csv we have two types of values, forecasted and actual. if VINTACE == Actual, then the data is the recorded observations for that day--otherwise the data is a forecast performed on the vintage day predicting weather conditions for the forecast_day. These forecasts/observations are made at each of the weather stations, and covers a range from march 1, 2011 to dec 16, 2018.
@@ -129,4 +138,16 @@ skim(forecastsWithActuals$lowerDif)
 forecastsWithActuals$upperDif = forecastsWithActuals$actual_MAX_TEMP - forecastsWithActuals$MAX_TEMP
 skim(forecastsWithActuals$upperDif)
 ```
+
+The differences between the forecasts and actuals seem fairly accurate--let's try squaring to assess the magnitude of inaccuracy
+
+```{r}
+forecastsWithActuals$lowerDifSquare = forecastsWithActuals$lowerDif ^ 2
+skim(forecastsWithActuals$lowerDifSquare)
+
+forecastsWithActuals$upperDifSquare = forecastsWithActuals$upperDif ^ 2
+skim(forecastsWithActuals$upperDifSquare)
+
+```
+
 

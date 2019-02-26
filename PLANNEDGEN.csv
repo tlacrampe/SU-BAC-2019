@@ -1,0 +1,35 @@
+﻿Class Year,Queue Pos.,Owner/Operator,Station Unit,Zone,Proposed Date(YY-Mth),Name Plate Rating (MW),Request CRIS (MW),CRIS (MW),Summer (MW),Winter (MW),Unit Type
+2011,251,"CPV Valley,LLC",CPV Valley Energy Center,G,18-Feb,820,680,680,677.6,690.6,Combine Cycle
+2015,395,Copenhagen Wind Farm,Copenhaen Wind ,E,18-Nov,79.9,79.9,79.9,79.9,79.9,Wind Turbines
+2011,349,Taylor Biomass Energy,Taylor Biomass,G,21-Apr,21,19,19,19,22.5,Solid Waste
+2017,511,AG Energy,Ogdensburg ,E,18-May,88.6,79,TBD,79,90.1,Combined Cycle
+2017,467,Shoreham Solar Commons,Shoreham Solar,K,18-Jun,25,24.9,TBD,25,25,Solar
+2017,421,EDP Renewables N.A.,Arkwright Summit,A,18-Oct,78.4,78.4,TBD,78.4,78.4,Wind Turbines
+2017,422,NextEra Energy,Eight Point Wind Energy Center,B,18-Dec,101.2,101.2,TBD,101.2,101.2,Wind Turbines
+2017,505,RES America Dev,Ball Hill Wind,A,18-Dec,100,100,TBD,100,100,Wind Turbines
+2017,387,Cassadaga Wind,Cassadaga Wind,A,19-Dec,126,126,TBD,126,126,Wind Turbines
+2017,396,Baron Winds,Barron Winds,C,19-Dec,300,300,TBD,300,300,Wind Turbines
+2017,468,Apec Clean Energy,Galoo Island Wind ,C,19-Dec,110.4,108.9,TBD,110.4,110.4,Wind Turbines
+2017,444,Cricket Valley Energy,Cricket Valley Energy Center II,G,20-Jan,1177.2,1020,TBD,1020,1132,Combined Cycle
+2017,523,Dunkirk Power,Dunkirk Unit 2,A,20-Apr,75,85,TBD,75,75,Steam Turbine
+2017,524,Dunkirk Power,Dunkirk Unit 3&4,A,20-Apr,370,370,TBD,370,370,Steam Turbine
+2017,496,Renovo Energy,Renovo Energy Center,C,20-Jun,480,480,TBD,480,504,Combined Cycle
+2017,494,Alabama Ledge Wind Farm,Alabama Ledge Wind Farm,A,20-Oct,79.8,79.8,TBD,79.8,79.8,Wind Turbines
+2017,498,ESC Tioga Co. Power,Tioga County Power,C,21-May,550,550,TBD,550,550,Combined Cycle
+2017,393,NRG Berrians East Dev,Berrians,J,22-Jun,637.5,508,TBD,508,584,Combustion Turbine
+Future Class Year Candidates,276,Air Energie TCI,Crown City Wind,C,18-Dec,90,TBD,TBD,90,90,Wind Turbines
+Future Class Year Candidates,495,Mohawk Solar LLC,Mohawk Solar,F,18-Dec,98,TBD,TBD,98,98,Wind Turbines
+Future Class Year Candidates,514,RES America Dev,Empire Wind,F,19-Oct,120,TBD,TBD,120,120,Wind Turbines
+Future Class Year Candidates,449,Stockbridge Wind,Stockbridge Wind,E,19-Dec,72.6,TBD,TBD,72.6,72.6,Wind Turbines
+Future Class Year Candidates,347,Franklin Wind Farm,Franklin Wind Farm,E,19-Dec,50.4,TBD,TBD,50.4,50.4,Wind Turbines
+Future Class Year Candidates,519,Canisteo Wind Energy,Canisteo Wind,C,19-Dec,290.7,TBD,TBD,290.7,290.7,Wind Turbines
+Future Class Year Candidates,531,Ivenery Wind Dev,Number 3 Wind,E,19-Dec,105.8,TBD,TBD,105.8,105.8,Wind Turbines
+Future Class Year Candidates,382,Astoria Generating,South Pier Improvement,J,20-Jun,95.5,TBD,TBD,91.2,95.5,Combustion Turbine
+Future Class Year Candidates,445,Lighthouse Wind,Lighthouse Wind,A,20-Dec,201.3,TBD,TBD,201.3,201.3,Wind Turbines
+Future Class Year Candidates,372,Dry Lots Wind,Dry Lots Wind,E,20-Dec,33,TBD,TBD,33,33,Wind Turbines
+Future Class Year Candidates,371,South Mountain Wind,South Mountain Wind,E,20-Dec,18,TBD,TBD,18,18,Wind Turbines
+Future Class Year Candidates,526,Atlantic Wind,North Ridge Wind,E,20-Dec,100,TBD,TBD,100,100,Wind Turbines
+Future Class Year Candidates,361,US PowerGen,Luyster Creek Energy,J,21-Jun,508.6,TBD,TBD,401,444,Combined Cycle
+Future Class Year Candidates,474,EDP Renewables N.A.,North Slope Wind,D,21-Oct,200,TBD,TBD,200,200,Wind Turbines
+Future Class Year Candidates,466,Atlantic Wind,Bone Run Wind,A,21-Dec,132,TBD,TBD,132,132,Wind Turbines
+Future Class Year Candidates,383,NRG Energy,Bowline Gen. Station Unit #3,G,22-Jun,814,TBD,TBD,775,814,Combined Cycle

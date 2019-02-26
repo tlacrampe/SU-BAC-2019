@@ -15,6 +15,9 @@ output:
  
 # loading in the libraries
 ```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
 library(tidyverse)
 library(skimr)            # useful for sumarizing information
 library(lubridate) # useful for manipulating datetime information
@@ -26,6 +29,7 @@ library(lubridate) # useful for manipulating datetime information
 LOAD = read.csv("LOAD.csv")
 PRICE = read.csv("PRICE.csv")
 WEATHER = read.csv("WEATHER.csv")
+PLANNED_GEN = read.csv("PLANNEDGEN.csv")
 ```
 
 # summarizing the data
@@ -34,6 +38,7 @@ WEATHER = read.csv("WEATHER.csv")
 skim(LOAD)
 skim(PRICE)
 skim(WEATHER)
+skim(PLANNED_GEN)
 ```
 
 No missing values for the LOAD dataset, PRICE dataset, and WEATHER dataset, which is good for us
@@ -148,6 +153,15 @@ skim(forecastsWithActuals$lowerDifSquare)
 forecastsWithActuals$upperDifSquare = forecastsWithActuals$upperDif ^ 2
 skim(forecastsWithActuals$upperDifSquare)
 
+```
+
+
+
+```{r}
+
+PLANNED_GEN %>% group_by(Zone) %>%
+  ggplot() +
+  geom_bar(aes(x=Zone))
 ```
 
 

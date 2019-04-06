@@ -30,6 +30,11 @@ LOAD = read.csv("LOAD.csv")
 PRICE = read.csv("PRICE.csv")
 WEATHER = read.csv("WEATHER.csv")
 PLANNED_GEN = read.csv("PLANNEDGEN.csv")
+HISTORICAL_DEMAND_IMPACTS = read.csv('Historical Demand Impacts.csv')
+ELECTRIC_CAR_IMPACTS = read.csv('Electric car forecast.csv')
+NATIONAL_CAP_COSTS_BY_UNIT_TYPE = read.csv('OVERNIGHT_CAPITAL_COSTS_PER_REGION_2017_DOLLARS_KwH.csv')
+COST_AND_PERFORM_CHARACTERISTICS_BY_UNIT_TYPE = read.csv('Cost and performance characteristics of new central station electricity generating technologies.csv')
+ESTIMATED_PROD_COSTS = read.csv('ESTIMATED_PROD_COSTS.csv')
 ```
 
 # summarizing the data
@@ -42,6 +47,47 @@ skim(PLANNED_GEN)
 ```
 
 No missing values for the LOAD dataset, PRICE dataset, and WEATHER dataset, which is good for us
+
+To make working with the other datasets easier, let's convert the zones in the price and load csvs to match the a-k values of the other sheets in the additional info xlsx.
+
+```{r}
+table(LOAD$ZONE)
+table(PRICE$ZONE)
+```
+
+Next lets make 2 vectors and combine them to join on
+
+```{r}
+letter = c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K')
+mappedZone = c('WEST', 'GENESE', 'CENTRL', 'NORTH', 'MHK VL', 'CAPITL', 'HUD VL', 'MILLWD', 'DUNWOD', 'N.Y.C.', 'LONGIL')
+letter_name = 'Abbrv_zone'
+mappedZone_name = 'ZONE'
+zoneKey = data.frame(mappedZone, letter)
+names(zoneKey) = c(mappedZone_name, letter_name)
+print(zoneKey)
+
+
+LOAD = LOAD %>% 
+  left_join(zoneKey)
+```
+
+Now let's try to match weather station id's to the zones--it looks like the station ids are mapped to cities in NY from NOA, so we can probably look each city up then place it wihin a zone manually. Site for the NOAA station ids: https://www.nws.noaa.gov/emwin/sitename.htm. I used google maps to locate each station and then manually alligned them with the energy zone map in the 'historical demand impacts' sheet of the 'additional_information' xlsx.
+
+```{r}
+table(WEATHER$STATION_ID)
+zoneName = c('ALB','ART','BGM','BUF','ELM','ELZ','FOK','FRG','GFL','HPN','IAG','ISP','ITH','JFK','LGA','MSS','MSV','NYC','PLB','POU','ROC','SLK','SWF','SYR','UCA')
+stationZone = c('F', 'E', 'C', 'A', 'C', 'B', 'K', 'K', 'F', 'H', 'A', 'K', 'C', 'IT', 'J', 'E', 'F', 'J', 'D', 'G', 'B', 'D', 'G', 'C', 'E')
+zoneName_name = 'STATION_ID'
+stationZone_name = 'Abbrv_zone'
+stationKey = data.frame(zoneName, stationZone)
+names(stationKey) = c(zoneName_name, stationZone_name)
+print(stationKey)
+
+WEATHER = WEATHER %>% 
+  left_join(stationKey)
+
+table(WEATHER$Abbrv_zone)
+```
 
 # combining the load and price on the date/time attribute (may introduce NAs through left joining)
 
@@ -155,13 +201,44 @@ skim(forecastsWithActuals$upperDifSquare)
 
 ```
 
-
+Now lets group the actual temperatures by zone, find the average max and min temp for each zone, and then add those to our inner dat
 
 ```{r}
-
-PLANNED_GEN %>% group_by(Zone) %>%
-  ggplot() +
-  geom_bar(aes(x=Zone))
+weatherByZone = actuals %>% 
+  group_by(VINTAGE_DATE, Abbrv_zone) %>% 
+  summarise(avg_actual_MAX_TEMP = mean(actual_MAX_TEMP), avg_actual_MIN_TEMP = mean(actual_MIN_TEMP), avg_actual_MAX_WET_BULB = mean(actual_MAX_WET_BULB), avg_actual_MIN_WET_BULB = mean(actual_MIN_WET_BULB))
 ```
+
+Now lets join this dataset onto the innerDat (the combo of the load and price csvs)
+
+```{r}
+# first we need to change the VINTAGE_DATE from a factor variable to a dd/mm/yyyy using lubridate
+weatherByZone$VINTAGE_DATE = as.character(weatherByZone$VINTAGE_DATE)
+weatherByZone$VINTAGE_DATE = mdy(weatherByZone$VINTAGE_DATE)
+innerDat$DATE_TIME = mdy_hm(innerDat$DATE_TIME)
+innerDat$DATE = as.Date(innerDat$DATE_TIME)
+priceLoadWeatherdat = 
+  left_join(innerDat,weatherByZone,by = c("DATE" = "VINTAGE_DATE", "Abbrv_zone" = "Abbrv_zone"))
+```
+
+
+To add one more layer for comparison, let's classify the zones into two bins: upstate NY and downstate NY
+
+```{r}
+# map to classify upstate Ny vs downstate here: http://write./wp/2018/04/18/heres-where-new-yorkers-think-upstate-new-york-is/?noredirect=on&utm_term=.9ffb6e5fd845
+# then compare to the zones classified in the 'historical demad impacts'
+letter # lets use the vector we already made
+upstate = c('Upstate', 'Upstate', 'Upstate', 'Upstate', 'Upstate', 'Upstate', 'Downstate', 'Downstate', 'Downstate', 'Downstate', 'Downstate') #Zone GHIJK = downstate, everything else is upstate
+upstate_name = 'upstate'
+upstateKey = data.frame(upstate, letter)
+names(upstateKey) = c(upstate_name, letter_name)
+print(upstateKey)
+
+priceLoadWeatherdat = priceLoadWeatherdat %>% 
+  left_join(upstateKey)
+priceLoadWeatherDatWithoutNA = na.omit(priceLoadWeatherdat)
+write.csv(priceLoadWeatherDatWithoutNA, file = "PriceLoadWeatherJoined.csv") # to use in tableau
+```
+
 
 

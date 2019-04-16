@@ -521,3 +521,71 @@ summary(arimaFourierLoadA)
 fcastFourierLoadA = forecast(arimaFourierLoadA, h = 4414, xreg = zoneAFutureTemps)
 plot(fcastFourierLoadA)
 ```
+
+let's try aggregating by month to see if forecasting improves
+
+```{r}
+priceLoadWeatherdat$month_year = format(as.Date(priceLoadWeatherdat$DATE_TIME), '%Y-%m')
+
+zoneAmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'A') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneAmonth$avg_actual_MAX_TEMP = ts(zoneAmonth$avg_actual_MAX_TEMP, frequency = 12)
+autoplot(zoneAmonth$avg_actual_MAX_TEMP)
+zoneAmonth$cumPeakLoad = ts(zoneAmonth$cumPeakLoad, frequency = 12)
+autoplot(zoneAmonth$cumPeakLoad)
+zoneAmonth$maxPeakLoad = ts(zoneAmonth$maxPeakLoad, frequency = 12)
+autoplot(zoneAmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneAmonth$maxPeakLoad = tsclean(zoneAmonth$maxPeakLoad)
+autoplot(zoneAmonth$maxPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempA = auto.arima(zoneAmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempA)
+fcastArimaMonthlyMaxTempA = forecast(arimaMonthlyMaxTempA, h = 144)
+plot(fcastArimaMonthlyMaxTempA)
+
+# next lets try forecasting future loads just using temp, no fourier component
+
+arimaMonthlyCumeLoadA = auto.arima(zoneAmonth$cumPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyCumeLoadA)
+fcastArimaMonthlyCumeLoadA = forecast(arimaMonthlyCumeLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+plot(fcastArimaMonthlyCumeLoadA)
+
+# let's try with the upper 85% confidence interval
+fcastArimaMonthlyCumeLoadA = forecast(arimaMonthlyCumeLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$upper[,1])
+plot(fcastArimaMonthlyCumeLoadA) # if anything, this one is decreasing
+
+# lets look at monthly peak loads instead
+arimaMonthlyPeakLoadA = auto.arima(zoneAmonth$maxPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyPeakLoadA)
+fcastArimaMonthlyPeakLoadA = forecast(arimaMonthlyPeakLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+plot(fcastArimaMonthlyPeakLoadA) # we could use the 85% confidence interval from this one
+
+# lets see if it shifts by removing temps
+
+arimaMonthlyPeakLoadAWithoutTemp = auto.arima(zoneAmonth$maxPeakLoad)
+summary(arimaMonthlyPeakLoadAWithoutTemp)
+fcastArimaMonthlyPeakLoadAWithoutTemp = forecast(arimaMonthlyPeakLoadAWithoutTemp, h = 144)
+plot(fcastArimaMonthlyPeakLoadAWithoutTemp) # doesnt change much
+
+# what if we do the logs?
+
+zoneAmonth$logMaxPeakLoad = log(zoneAmonth$maxPeakLoad)
+arimaMonthlyPeakLoadAlog = auto.arima(zoneAmonth$logMaxPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyPeakLoadAlog)
+fcastArimaMonthlyPeakLoadAlog = forecast(arimaMonthlyPeakLoadAlog, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+plot(fcastArimaMonthlyPeakLoadAlog)
+```
+

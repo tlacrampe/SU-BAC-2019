@@ -21,6 +21,9 @@ library(GGally)
 library(tidyverse)
 library(skimr)            # useful for sumarizing information
 library(lubridate) # useful for manipulating datetime information
+library(forecast) #contains packages for making the forecasts
+library(tseries) #useful functions for making forecasts
+library(fpp2) #contains function for plotting time seires
 ```
 
 # reading in the data
@@ -76,7 +79,7 @@ Now let's try to match weather station id's to the zones--it looks like the stat
 ```{r}
 table(WEATHER$STATION_ID)
 zoneName = c('ALB','ART','BGM','BUF','ELM','ELZ','FOK','FRG','GFL','HPN','IAG','ISP','ITH','JFK','LGA','MSS','MSV','NYC','PLB','POU','ROC','SLK','SWF','SYR','UCA')
-stationZone = c('F', 'E', 'C', 'A', 'C', 'B', 'K', 'K', 'F', 'H', 'A', 'K', 'C', 'IT', 'J', 'E', 'F', 'J', 'D', 'G', 'B', 'D', 'G', 'C', 'E')
+stationZone = c('F', 'E', 'C', 'A', 'C', 'B', 'K', 'K', 'F', 'H', 'A', 'K', 'C', 'I', 'J', 'E', 'F', 'J', 'D', 'G', 'B', 'D', 'G', 'C', 'E')
 zoneName_name = 'STATION_ID'
 stationZone_name = 'Abbrv_zone'
 stationKey = data.frame(zoneName, stationZone)
@@ -331,12 +334,190 @@ write.csv(cleanned_gen_facilities_2017, file = 'clean_gen_facilities_2017.csv')
 
 # Now let's get to forecasting!
 
+first create daily subsets of each zone
+
 ```{r}
 zoneA = priceLoadWeatherdat %>% 
-  filter(ZONE == 'A')
+  filter(Abbrv_zone == 'A') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneB = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'B') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneC = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'C') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))  
+zoneD = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'D') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneE = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'D') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneF = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'F') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneG = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'G') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneH = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'H') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneI = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'I') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneJ = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'J') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
+zoneK = priceLoadWeatherdat %>% 
+  filter(Abbrv_zone == 'K') %>% 
+  group_by(DATE) %>% 
+  summarize(peakLoad = max(LOAD),
+            peakLMBP = max(LMBP),
+            peakMCL = max(MCL),
+            peakMCC = max(MCC),
+            avg_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+            avg_actual_MIN_TEMP = max(avg_actual_MIN_TEMP))
 ```
 
+let's forecast!
+
+```{r}
+zoneA$avg_actual_MAX_TEMP = ts(zoneA$avg_actual_MAX_TEMP, frequency = 365)
+
+# lets look at a quarterly, monthly, weekly, and daily moving average
+zoneA$avg_actual_MAX_TEMP_ma120 = ma(zoneA$avg_actual_MAX_TEMP, order = 120)
+zoneA$avg_actual_MAX_TEMP_ma30 = ma(zoneA$avg_actual_MAX_TEMP, order = 30)
+zoneA$avg_actual_MAX_TEMP_ma7 = ma(zoneA$avg_actual_MAX_TEMP, order = 7)
+zoneA$avg_actual_MAX_TEMP_ma1 = ma(zoneA$avg_actual_MAX_TEMP, order = 1)
+ggplot() +
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP, colour = "Temps")) +
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma120, colour = 'Quarterly')) + 
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma30, colour = 'Monthly')) +
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma7, colour = 'Weekly')) +
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma1, colour = 'daily')) +
+  theme_classic()
+
+# kind of cluttered, lets look at just the averages
+ggplot() +
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma120, colour = 'Quarterly')) + 
+  geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma30, colour = 'Monthly')) +
+  theme_classic()
+
+# looks like the weekly trends could be good
+
+# next lets decompose the data
+avg_max_temp_A_ma = ts(na.omit(zoneA$avg_actual_MAX_TEMP_ma120), frequency = 365)
+decomp = stl(avg_max_temp_A_ma, s.window = 'periodic')
+deseasonal_temp = seasadj(decomp)
+plot(decomp)
+
+# now lets check its stationarity
+adf.test(avg_max_temp_A_ma, alternative = "stationary")
+
+acf(avg_max_temp_A_ma, main = '')
+pacf(avg_max_temp_A_ma, main = '')
+
+# next lets fit an arimax model
+
+# Developing a SARIMAX model with exogenous fourier transformation (as the data and our forecast is multi-seasonal) see https://robjhyndman.com/hyndsight/longseasonality/
+
+arimaFourierMaxA = auto.arima(zoneA$avg_actual_MAX_TEMP, seasonal = FALSE, xreg=fourier(zoneA$avg_actual_MAX_TEMP, K=4))
+summary(arimaFourier)
+fcastMaxTempA = forecast(arimaFourierMaxA, h = 4414, xreg = fourier(zoneA$avg_actual_MAX_TEMP, K = 4, h = 4414)) #4414 is the number of days from 12/01/2018 to 12/31/2030
+plot(fcastMaxTempA) 
+plot(fcastMaxTempA$mean)
+plot(fcastMaxTempA$upper[,1])
+plot(fcastMaxTempA$residuals)
 
 
+zoneA$avg_actual_MIN_TEMP = ts(zoneA$avg_actual_MIN_TEMP, frequency = 365)
+arimaFourierMinA = auto.arima(zoneA$avg_actual_MIN_TEMP, seasonal = FALSE, xreg=fourier(zoneA$avg_actual_MIN_TEMP, K=4))
+fcastMinTempA = forecast(arimaFourierMinA, h = 4414, xreg = fourier(zoneA$avg_actual_MIN_TEMP, K=4, h = 4414))
+plot(fcastMinTempA)
+plot(fcastMinTempA$mean)
+plot(fcastMinTempA$residuals)
 
+# next let's look at forecasting loads
+zoneA$peakLoad = ts(zoneA$peakLoad, frequency = 365)
+autoplot(zoneA$peakLoad) # wow theres a big outlier,
+zoneA$peakLoad = tsclean(zoneA$peakLoad)
+autoplot(zoneA$peakLoad) # much better, outlier has been replaced, next lets create an auto.arima using our max and min temps as external regressours
 
+zoneAtemps = cbind(zoneA$avg_actual_MAX_TEMP, zoneA$avg_actual_MIN_TEMP)
+zoneAFutureTemps = cbind(fcastMaxTempA$upper[,1], fcastMinTempA$lower[,1]) # used to generate future forecast of load temps
+arimaLoadA = auto.arima(zoneA$peakLoad, seasonal = FALSE, xreg = zoneAtemps)
+summary(arimaLoadA)
+
+fcastLoadA = forecast(arimaLoadA, h = 4414, xreg = zoneAFutureTemps) # warning message is fine, the order of columns is correct
+plot(fcastLoadA)
+
+#doesn't look so great, let's include fourier affects into our regression
+
+zoneAtemps = cbind(zoneAtemps, fourier(zoneA$peakLoad, K=4))
+zoneAFutureTemps = cbind(zoneAFutureTemps, fourier(zoneA$peakLoad, K=4, h = 4414))
+
+arimaFourierLoadA = auto.arima(zoneA$peakLoad, seasonal = FALSE, xreg = zoneAtemps)
+summary(arimaFourierLoadA)
+
+fcastFourierLoadA = forecast(arimaFourierLoadA, h = 4414, xreg = zoneAFutureTemps)
+plot(fcastFourierLoadA)
+```

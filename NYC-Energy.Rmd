@@ -24,6 +24,7 @@ library(lubridate) # useful for manipulating datetime information
 library(forecast) #contains packages for making the forecasts
 library(tseries) #useful functions for making forecasts
 library(fpp2) #contains function for plotting time seires
+library(prophet) # contains facebook's in-house modeling tools that can include holidays, external regressors, and plots out the various components in a forecasting model
 ```
 
 # reading in the data
@@ -318,7 +319,6 @@ cleanned_gen_facilities_2017 = cleanned_gen_facilities_2017 %>%
   left_join(countyKey, by = c("County" = "County", "State_Name" = "State_Name"))
 
 cleanned_gen_facilities_2017$City = cleanned_gen_facilities_2017$Town
-
 ```
 
 # flag which facilities are considered 'energy efficient' by their fuel sources
@@ -462,13 +462,13 @@ ggplot() +
   geom_line(data = zoneA, aes(x = DATE, y = avg_actual_MAX_TEMP_ma30, colour = 'Monthly')) +
   theme_classic()
 
-# looks like the weekly trends could be good
-
 # next lets decompose the data
 avg_max_temp_A_ma = ts(na.omit(zoneA$avg_actual_MAX_TEMP_ma120), frequency = 365)
 decomp = stl(avg_max_temp_A_ma, s.window = 'periodic')
 deseasonal_temp = seasadj(decomp)
 plot(decomp)
+
+ggAcf(zoneA$avg_actual_MAX_TEMP)
 
 # now lets check its stationarity
 adf.test(avg_max_temp_A_ma, alternative = "stationary")
@@ -488,7 +488,6 @@ plot(fcastMaxTempA$mean)
 plot(fcastMaxTempA$upper[,1])
 plot(fcastMaxTempA$residuals)
 
-
 zoneA$avg_actual_MIN_TEMP = ts(zoneA$avg_actual_MIN_TEMP, frequency = 365)
 arimaFourierMinA = auto.arima(zoneA$avg_actual_MIN_TEMP, seasonal = FALSE, xreg=fourier(zoneA$avg_actual_MIN_TEMP, K=4))
 fcastMinTempA = forecast(arimaFourierMinA, h = 4414, xreg = fourier(zoneA$avg_actual_MIN_TEMP, K=4, h = 4414))
@@ -501,6 +500,11 @@ zoneA$peakLoad = ts(zoneA$peakLoad, frequency = 365)
 autoplot(zoneA$peakLoad) # wow theres a big outlier,
 zoneA$peakLoad = tsclean(zoneA$peakLoad)
 autoplot(zoneA$peakLoad) # much better, outlier has been replaced, next lets create an auto.arima using our max and min temps as external regressours
+ggAcf(zoneA$peakLoad)
+
+# looks like the weekly trends could be good
+ggseasonplot(zoneA$peakLoad, polar = TRUE)
+ggsubseriesplot(zoneA$peakLoad)
 
 zoneAtemps = cbind(zoneA$avg_actual_MAX_TEMP, zoneA$avg_actual_MIN_TEMP)
 zoneAFutureTemps = cbind(fcastMaxTempA$upper[,1], fcastMinTempA$lower[,1]) # used to generate future forecast of load temps
@@ -520,6 +524,14 @@ summary(arimaFourierLoadA)
 
 fcastFourierLoadA = forecast(arimaFourierLoadA, h = 4414, xreg = zoneAFutureTemps)
 plot(fcastFourierLoadA)
+
+#still not super great, lets try using log to adjust the values
+zoneA$logPeakLoad = log(zoneA$peakLoad)
+arimaFourierLoadAlog = auto.arima(zoneA$logPeakLoad, seasonal = FALSE, xreg = zoneAtemps)
+summary(arimaFourierLoadAlog)
+
+fcastFourierLoadAlog = forecast(arimaFourierLoadAlog, h = 4414, xreg = zoneAFutureTemps)
+plot(fcastFourierLoadAlog) # still not great, the AIC is also still really high
 ```
 
 let's try aggregating by month to see if forecasting improves
@@ -541,51 +553,1904 @@ zoneAmonth = priceLoadWeatherdat %>%
 ```
 
 ```{r}
-zoneAmonth$avg_actual_MAX_TEMP = ts(zoneAmonth$avg_actual_MAX_TEMP, frequency = 12)
+zoneAmonth$avg_actual_MAX_TEMP = ts(zoneAmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
 autoplot(zoneAmonth$avg_actual_MAX_TEMP)
-zoneAmonth$cumPeakLoad = ts(zoneAmonth$cumPeakLoad, frequency = 12)
+zoneAmonth$cumPeakLoad = ts(zoneAmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
 autoplot(zoneAmonth$cumPeakLoad)
-zoneAmonth$maxPeakLoad = ts(zoneAmonth$maxPeakLoad, frequency = 12)
+zoneAmonth$maxPeakLoad = ts(zoneAmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
 autoplot(zoneAmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
 zoneAmonth$maxPeakLoad = tsclean(zoneAmonth$maxPeakLoad)
 autoplot(zoneAmonth$maxPeakLoad)
+ggseasonplot(zoneAmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneAmonth$cumPeakLoad)
+gglagplot(zoneAmonth$cumPeakLoad)
+ggAcf(zoneAmonth$cumPeakLoad)
 
 # lets start by forecasting temps
 arimaMonthlyMaxTempA = auto.arima(zoneAmonth$avg_actual_MAX_TEMP)
 summary(arimaMonthlyMaxTempA)
-fcastArimaMonthlyMaxTempA = forecast(arimaMonthlyMaxTempA, h = 144)
+fcastArimaMonthlyMaxTempA = forecast(arimaMonthlyMaxTempA, h = 145)
 plot(fcastArimaMonthlyMaxTempA)
+
+# will taking the log improve AIC?
+zoneAmonth$log_avg_actual_MAX_TEMP = log(zoneAmonth$avg_actual_MAX_TEMP)
+arimaMonthlyMaxTempAlog = auto.arima(zoneAmonth$log_avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempAlog)
+fcastArimaMonthlyMaxTempAlog = forecast(arimaMonthlyMaxTempAlog, h = 145)
+plot(fcastArimaMonthlyMaxTempAlog)
 
 # next lets try forecasting future loads just using temp, no fourier component
 
 arimaMonthlyCumeLoadA = auto.arima(zoneAmonth$cumPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
 summary(arimaMonthlyCumeLoadA)
-fcastArimaMonthlyCumeLoadA = forecast(arimaMonthlyCumeLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+fcastArimaMonthlyCumeLoadA = forecast(arimaMonthlyCumeLoadA, h = 145, xreg = fcastArimaMonthlyMaxTempA$mean)
 plot(fcastArimaMonthlyCumeLoadA)
 
+# let's try taking the log
+arimaMonthlyCumeLoadAlog = auto.arima(zoneAmonth$cumPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadAlog)
+checkresiduals(arimaMonthlyCumeLoadAlog)
+
+fcastArimaMonthlyCumeLoadAlog = forecast(arimaMonthlyCumeLoadAlog, h = 145, xreg = fcastArimaMonthlyMaxTempA$mean)
+plot(fcastArimaMonthlyCumeLoadAlog) # actually looks pretty good
+
 # let's try with the upper 85% confidence interval
-fcastArimaMonthlyCumeLoadA = forecast(arimaMonthlyCumeLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$upper[,1])
+fcastArimaMonthlyCumeLoadAlog = forecast(arimaMonthlyCumeLoadAlog, h = 145, xreg = fcastArimaMonthlyMaxTempA$upper[,1])
 plot(fcastArimaMonthlyCumeLoadA) # if anything, this one is decreasing
 
 # lets look at monthly peak loads instead
 arimaMonthlyPeakLoadA = auto.arima(zoneAmonth$maxPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
 summary(arimaMonthlyPeakLoadA)
-fcastArimaMonthlyPeakLoadA = forecast(arimaMonthlyPeakLoadA, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+fcastArimaMonthlyPeakLoadA = forecast(arimaMonthlyPeakLoadA, h = 145, xreg = fcastArimaMonthlyMaxTempA$mean)
 plot(fcastArimaMonthlyPeakLoadA) # we could use the 85% confidence interval from this one
 
 # lets see if it shifts by removing temps
 
 arimaMonthlyPeakLoadAWithoutTemp = auto.arima(zoneAmonth$maxPeakLoad)
 summary(arimaMonthlyPeakLoadAWithoutTemp)
-fcastArimaMonthlyPeakLoadAWithoutTemp = forecast(arimaMonthlyPeakLoadAWithoutTemp, h = 144)
+fcastArimaMonthlyPeakLoadAWithoutTemp = forecast(arimaMonthlyPeakLoadAWithoutTemp, h = 145)
 plot(fcastArimaMonthlyPeakLoadAWithoutTemp) # doesnt change much
 
 # what if we do the logs?
-
-zoneAmonth$logMaxPeakLoad = log(zoneAmonth$maxPeakLoad)
-arimaMonthlyPeakLoadAlog = auto.arima(zoneAmonth$logMaxPeakLoad, xreg = zoneAmonth$avg_actual_MAX_TEMP)
+arimaMonthlyPeakLoadAlog = auto.arima(zoneAmonth$maxPeakLoad,xreg = zoneAmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
 summary(arimaMonthlyPeakLoadAlog)
-fcastArimaMonthlyPeakLoadAlog = forecast(arimaMonthlyPeakLoadAlog, h = 144, xreg = fcastArimaMonthlyMaxTempA$mean)
+checkresiduals(arimaMonthlyPeakLoadAlog)
+
+fcastArimaMonthlyPeakLoadAlog = forecast(arimaMonthlyPeakLoadAlog, h = 145, xreg = fcastArimaMonthlyMaxTempA$mean)
+plot(fcastArimaMonthlyPeakLoadAlog) 
+```
+
+now that we have a good idea for the forecasts (temperatures->log of cumulative hourly peak loads and log of peak monthly loads) let's try in another zone (zone J, NYC)
+
+```{r}
+zoneJmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'J') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneJmonth$avg_actual_MAX_TEMP = ts(zoneJmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneJmonth$avg_actual_MAX_TEMP)
+zoneJmonth$cumPeakLoad = ts(zoneJmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneJmonth$cumPeakLoad)
+zoneJmonth$maxPeakLoad = ts(zoneJmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneJmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneJmonth$maxPeakLoad = tsclean(zoneJmonth$maxPeakLoad)
+autoplot(zoneJmonth$maxPeakLoad)
+ggseasonplot(zoneJmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneJmonth$cumPeakLoad)
+gglagplot(zoneJmonth$cumPeakLoad)
+ggAcf(zoneJmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempJ = auto.arima(zoneJmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempJ)
+fcastArimaMonthlyMaxTempJ = forecast(arimaMonthlyMaxTempJ, h = 145)
+plot(fcastArimaMonthlyMaxTempJ)
+
+# will taking the log improve AIC?
+zoneJmonth$log_avg_actual_MAX_TEMP = log(zoneJmonth$avg_actual_MAX_TEMP)
+arimaMonthlyMaxTempJlog = auto.arima(zoneJmonth$log_avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempJlog) #looks like 
+fcastArimaMonthlyMaxTempJlog = forecast(arimaMonthlyMaxTempJlog, h = 145)
+plot(fcastArimaMonthlyMaxTempJlog)
+
+# next lets try forecasting future loads just using temp, no fourier component
+
+arimaMonthlyCumeLoadJ = auto.arima(zoneJmonth$cumPeakLoad, xreg = zoneJmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyCumeLoadJ)
+fcastArimaMonthlyCumeLoadJ = forecast(arimaMonthlyCumeLoadJ, h = 145, xreg = fcastArimaMonthlyMaxTempJ$mean)
+plot(fcastArimaMonthlyCumeLoadJ)
+
+# let's try taking the log
+arimaMonthlyCumeLoadJlog = auto.arima(zoneJmonth$cumPeakLoad, xreg = zoneJmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadJlog)
+checkresiduals(arimaMonthlyCumeLoadJlog)
+
+fcastArimaMonthlyCumeLoadJlog = forecast(arimaMonthlyCumeLoadJlog, h = 145, xreg = fcastArimaMonthlyMaxTempJ$mean)
+plot(fcastArimaMonthlyCumeLoadJlog) # actually looks pretty good
+
+# let's try with the upper 85% confidence interval
+fcastArimaMonthlyCumeLoadJ = forecast(arimaMonthlyCumeLoadJ, h = 145, xreg = fcastArimaMonthlyMaxTempJ$upper[,1])
+plot(fcastArimaMonthlyCumeLoadJ) # if anything, this one is decreasing
+
+# lets look at monthly peak loads instead
+arimaMonthlyPeakLoadJ = auto.arima(zoneJmonth$maxPeakLoad, xreg = zoneJmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyPeakLoadJ)
+fcastArimaMonthlyPeakLoadJ = forecast(arimaMonthlyPeakLoadJ, h = 145, xreg = fcastArimaMonthlyMaxTempJ$mean)
+plot(fcastArimaMonthlyPeakLoadJ) # we could use the 85% confidence interval from this one
+
+# lets see if it shifts by removing temps
+
+arimaMonthlyPeakLoadJWithoutTemp = auto.arima(zoneJmonth$maxPeakLoad)
+summary(arimaMonthlyPeakLoadJWithoutTemp)
+fcastArimaMonthlyPeakLoadJWithoutTemp = forecast(arimaMonthlyPeakLoadJWithoutTemp, h = 145)
+plot(fcastArimaMonthlyPeakLoadJWithoutTemp) # doesnt change much
+
+# what if we do the logs?
+arimaMonthlyPeakLoadJlog = auto.arima(zoneJmonth$maxPeakLoad,xreg = zoneJmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadJlog)
+checkresiduals(arimaMonthlyPeakLoadJlog)
+
+fcastArimaMonthlyPeakLoadJlog = forecast(arimaMonthlyPeakLoadJlog, h = 145, xreg = fcastArimaMonthlyMaxTempJ$mean)
+plot(fcastArimaMonthlyPeakLoadJlog) 
+```
+
+# It seems like the go-to way of modeling these trends involves developing an arima for the temps and then using those as external regressors for logs of both peak and cumulative monthly loads
+
+# To begin looking into how to include electric vehicle demand in the future, lets look at a histogram by hour of the max peak loads
+
+```{r}
+priceLoadWeatherdat$hour = format(ymd_hms(priceLoadWeatherdat$DATE_TIME))
+priceLoadWeatherdat$hour = hour(priceLoadWeatherdat$hour)
+
+peakLoadHistDat = priceLoadWeatherdat %>% 
+  group_by(DATE) %>% 
+  summarize(
+        maxPeakLoad = max(LOAD))
+joiningDat = priceLoadWeatherdat %>% 
+  select(DATE, hour, LOAD)
+peakLoadHistDat = peakLoadHistDat %>% 
+  left_join(joiningDat, by = c('DATE' = 'DATE', 'maxPeakLoad' = 'LOAD'))
+rm(joiningDat)
+
+ggplot(peakLoadHistDat, aes(x = hour)) + geom_histogram(binwidth = 1) #weird, seems to peak overnight and then in the early morning. lets facet wrap by month
+
+peakLoadHistDat$month = format(ymd(peakLoadHistDat$DATE))
+peakLoadHistDat$month = month(peakLoadHistDat$month)
+peakLoadHistDat$month = as.factor(peakLoadHistDat$month)
+peakLoadHistDat$hour = as.factor(peakLoadHistDat$hour)
+ggplot(peakLoadHistDat, aes(x = hour)) + geom_bar(aes(y = ..count../sum(..count..))) + facet_wrap(vars(month))
+```
+
+# lets start working with the electric car impacts and layering those into our forecast
+
+```{r}
+# first we need to convert from wide data to long data (having each zone in one column with the value as a third column)
+ELECTRIC_CAR_IMPACTS$Year = as.factor(ELECTRIC_CAR_IMPACTS$Year)
+Electric_car_long = gather(ELECTRIC_CAR_IMPACTS, zone, value, A:NYCA, factor_key = TRUE)
+
+# Next lets convert our year variable into string then numeric
+Electric_car_long$Year = as.character(Electric_car_long$Year)
+Electric_car_long$Year = as.numeric(Electric_car_long$Year)
+
+# Now we filter between the years we need
+Electric_car_long_2019_to_2030 = Electric_car_long %>% 
+  filter(Year <= 2030) %>% 
+  filter(Year >= 2018)
+
+# Now we convert from Gigawatt hours (for electric car demand) to megawatt hours (to align with the forecasts)
+Electric_car_long_2019_to_2030$value = Electric_car_long_2019_to_2030$value * 1000
+```
+
+# now that we have our converted long dataset from 2019 to 2030, let's try adding them to the 85th percentile prediction interval for the cumulative and the peak monthly forecasts
+
+```{r}
+# store the future vectors
+zoneAPeakFutures = fcastArimaMonthlyPeakLoadAlog$upper[,1] # may want to switch to $mean
+zoneAPeakFutures
+zoneACumulativeFutures = fcastArimaMonthlyCumeLoadAlog$upper[,1]
+zoneACumulativeFutures
+zoneATempFutures = fcastArimaMonthlyMaxTempA$mean
+zoneATempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneAFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneAFutures) = c('Year', 'Month')
+zoneAFutures$Date = with(zoneAFutures, sprintf('%d-%02d', Year, Month))
+zoneAFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneAFutures) 
+length(zoneAPeakFutures)
+
+# since they match, we can join them
+zoneAFutures$monthlyPeakLoads = zoneAPeakFutures
+zoneAFutures$monthlyPeakLoads # yay!
+zoneAFutures$monthlyCumulativeLoads = zoneACumulativeFutures 
+zoneAFutures$monthlyMaxTemps = zoneATempFutures
+
+# filtering vehicle data and joining on proper zone
+carA = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'A')
+zoneAFutures = zoneAFutures %>% 
+  left_join(carA, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneAFutures$monthlyElectricVehicleImpact = zoneAFutures$value / 12 # cumulative
+zoneAFutures$monthlyCumulativeLoadsWithCar = zoneAFutures$monthlyCumulativeLoads + zoneAFutures$monthlyElectricVehicleImpact
+
+zoneAFutures$monthlyElectricVehiclePeakImpact = zoneAFutures$value / 12 / 31 # for peak loads
+zoneAFutures$monthlyPeakLoadsWithCar = zoneAFutures$monthlyPeakLoads + zoneAFutures$monthlyElectricVehiclePeakImpact
+
+```
+
+let's try plotting them
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneAmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneAmonth$month_year)
+futurePlottingDat = data.frame(zoneAFutures$monthlyPeakLoadsWithCar, zoneAFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneAmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneAcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneAmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneAmonth$month_year)
+futurePlottingDat = data.frame(zoneAFutures$monthlyCumulativeLoadsWithCar, zoneAFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneAmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneACurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneAPastAndFuture = data.frame(zoneAcurrentAndForecastedPeaks, zoneACurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneAmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneAmonth$month_year)
+futurePlottingDat = data.frame(zoneAFutures$monthlyMaxTemps, zoneAFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneAmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneAPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneAPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneAPastAndFuture$zoneAcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneAPastAndFuture$zoneACurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneAPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+```
+
+# for zone J
+
+```{r}
+# store the future vectors
+zoneJPeakFutures = fcastArimaMonthlyPeakLoadJlog$upper[,1] # may want to switch to $mean
+zoneJPeakFutures
+zoneJCumulativeFutures = fcastArimaMonthlyCumeLoadJlog$upper[,1]
+zoneJCumulativeFutures
+zoneJTempFutures = fcastArimaMonthlyMaxTempJ$mean
+zoneJTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneJFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneJFutures) = c('Year', 'Month')
+zoneJFutures$Date = with(zoneJFutures, sprintf('%d-%02d', Year, Month))
+zoneJFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneJFutures) 
+length(zoneJPeakFutures)
+
+# since they match, we can join them
+zoneJFutures$monthlyPeakLoads = zoneJPeakFutures
+zoneJFutures$monthlyPeakLoads # yay!
+zoneJFutures$monthlyCumulativeLoads = zoneJCumulativeFutures 
+zoneJFutures$monthlyMaxTemps = zoneJTempFutures
+
+# filtering vehicle data and joining on proper zone
+carJ = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'J')
+zoneJFutures = zoneJFutures %>% 
+  left_join(carJ, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneJFutures$monthlyElectricVehicleImpact = zoneJFutures$value / 12 # cumulative
+zoneJFutures$monthlyCumulativeLoadsWithCar = zoneJFutures$monthlyCumulativeLoads + zoneJFutures$monthlyElectricVehicleImpact
+
+zoneJFutures$monthlyElectricVehiclePeakImpact = zoneJFutures$value / 12 / 31 # for peak loads
+zoneJFutures$monthlyPeakLoadsWithCar = zoneJFutures$monthlyPeakLoads + zoneJFutures$monthlyElectricVehiclePeakImpact
+
+```
+
+let's try plotting them
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneJmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneJmonth$month_year)
+futurePlottingDat = data.frame(zoneJFutures$monthlyPeakLoadsWithCar, zoneJFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneJmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneJcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneJmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneJmonth$month_year)
+futurePlottingDat = data.frame(zoneJFutures$monthlyCumulativeLoadsWithCar, zoneJFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneJmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneJCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneJPastAndFuture = data.frame(zoneJcurrentAndForecastedPeaks, zoneJCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneJmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneJmonth$month_year)
+futurePlottingDat = data.frame(zoneJFutures$monthlyMaxTemps, zoneJFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneJmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneJPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneJPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneJPastAndFuture$zoneJcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneJPastAndFuture$zoneJCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneJPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+
+# Now to do this for the rest of the zones
+# zone B
+
+```{r}
+zoneBmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'B') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneBmonth$avg_actual_MAX_TEMP = ts(zoneBmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneBmonth$avg_actual_MAX_TEMP)
+zoneBmonth$cumPeakLoad = ts(zoneBmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneBmonth$cumPeakLoad)
+zoneBmonth$maxPeakLoad = ts(zoneBmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneBmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneBmonth$maxPeakLoad = tsclean(zoneBmonth$maxPeakLoad)
+autoplot(zoneBmonth$maxPeakLoad)
+ggseasonplot(zoneBmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneBmonth$cumPeakLoad)
+gglagplot(zoneBmonth$cumPeakLoad)
+ggAcf(zoneBmonth$cumPeakLoad)
+ggtsdisplay(zoneBmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempB = auto.arima(zoneBmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempB)
+fcastArimaMonthlyMaxTempB = forecast(arimaMonthlyMaxTempB, h = 145)
+plot(fcastArimaMonthlyMaxTempB)
+
+# let's try taking the log
+arimaMonthlyCumeLoadBlog = auto.arima(zoneBmonth$cumPeakLoad, xreg = zoneBmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadBlog)
+checkresiduals(arimaMonthlyCumeLoadBlog)
+
+fcastArimaMonthlyCumeLoadBlog = forecast(arimaMonthlyCumeLoadBlog, h = 145, xreg = fcastArimaMonthlyMaxTempB$mean)
+plot(fcastArimaMonthlyCumeLoadBlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadBlog = auto.arima(zoneBmonth$maxPeakLoad,xreg = zoneBmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadBlog)
+checkresiduals(arimaMonthlyPeakLoadBlog)
+
+fcastArimaMonthlyPeakLoadBlog = forecast(arimaMonthlyPeakLoadBlog, h = 145, xreg = fcastArimaMonthlyMaxTempB$mean)
+plot(fcastArimaMonthlyPeakLoadBlog) 
+```
+
+```{r}
+# store the future vectors
+zoneBPeakFutures = fcastArimaMonthlyPeakLoadBlog$mean # may want to switch to $mean
+zoneBPeakFutures
+zoneBCumulativeFutures = fcastArimaMonthlyCumeLoadBlog$upper[,1]
+zoneBCumulativeFutures
+zoneBTempFutures = fcastArimaMonthlyMaxTempB$mean
+zoneBTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneBFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneBFutures) = c('Year', 'Month')
+zoneBFutures$Date = with(zoneBFutures, sprintf('%d-%02d', Year, Month))
+zoneBFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneBFutures) 
+length(zoneBPeakFutures)
+
+# since they match, we can join them
+zoneBFutures$monthlyPeakLoads = zoneBPeakFutures
+zoneBFutures$monthlyPeakLoads # yay!
+zoneBFutures$monthlyCumulativeLoads = zoneBCumulativeFutures 
+zoneBFutures$monthlyMaxTemps = zoneBTempFutures
+
+# filtering vehicle data and joining on proper zone
+carB = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'B')
+zoneBFutures = zoneBFutures %>% 
+  left_join(carB, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneBFutures$monthlyElectricVehicleImpact = zoneBFutures$value / 12 # cumulative
+zoneBFutures$monthlyCumulativeLoadsWithCar = zoneBFutures$monthlyCumulativeLoads + zoneBFutures$monthlyElectricVehicleImpact
+
+zoneBFutures$monthlyElectricVehiclePeakImpact = zoneBFutures$value / 12 / 31 # for peak loads
+zoneBFutures$monthlyPeakLoadsWithCar = zoneBFutures$monthlyPeakLoads + zoneBFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneBmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneBmonth$month_year)
+futurePlottingDat = data.frame(zoneBFutures$monthlyPeakLoadsWithCar, zoneBFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneBmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneBcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneBmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneBmonth$month_year)
+futurePlottingDat = data.frame(zoneBFutures$monthlyCumulativeLoadsWithCar, zoneBFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneBmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneBCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneBPastAndFuture = data.frame(zoneBcurrentAndForecastedPeaks, zoneBCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneBmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneBmonth$month_year)
+futurePlottingDat = data.frame(zoneBFutures$monthlyMaxTemps, zoneBFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneBmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneBPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneBPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneBPastAndFuture$zoneBcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneBPastAndFuture$zoneBCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneBPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone C
+
+```{r}
+zoneCmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'C') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneCmonth$avg_actual_MAX_TEMP = ts(zoneCmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneCmonth$avg_actual_MAX_TEMP)
+zoneCmonth$cumPeakLoad = ts(zoneCmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneCmonth$cumPeakLoad)
+zoneCmonth$maxPeakLoad = ts(zoneCmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneCmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneCmonth$maxPeakLoad = tsclean(zoneCmonth$maxPeakLoad)
+autoplot(zoneCmonth$maxPeakLoad)
+ggseasonplot(zoneCmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneCmonth$cumPeakLoad)
+gglagplot(zoneCmonth$cumPeakLoad)
+ggAcf(zoneCmonth$cumPeakLoad)
+ggtsdisplay(zoneCmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempC = auto.arima(zoneCmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempC)
+fcastArimaMonthlyMaxTempC = forecast(arimaMonthlyMaxTempC, h = 145)
+plot(fcastArimaMonthlyMaxTempC)
+
+# let's try taking the log
+arimaMonthlyCumeLoadClog = auto.arima(zoneCmonth$cumPeakLoad, xreg = zoneCmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadClog)
+checkresiduals(arimaMonthlyCumeLoadClog)
+
+fcastArimaMonthlyCumeLoadClog = forecast(arimaMonthlyCumeLoadClog, h = 145, xreg = fcastArimaMonthlyMaxTempC$mean)
+plot(fcastArimaMonthlyCumeLoadClog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadClog = auto.arima(zoneCmonth$maxPeakLoad,xreg = zoneCmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadClog)
+checkresiduals(arimaMonthlyPeakLoadClog)
+
+fcastArimaMonthlyPeakLoadClog = forecast(arimaMonthlyPeakLoadClog, h = 145, xreg = fcastArimaMonthlyMaxTempC$mean)
+plot(fcastArimaMonthlyPeakLoadClog) 
+```
+
+```{r}
+# store the future vectors
+zoneCPeakFutures = fcastArimaMonthlyPeakLoadClog$upper[,1] # may want to switch to $mean
+zoneCPeakFutures
+zoneCCumulativeFutures = fcastArimaMonthlyCumeLoadClog$upper[,1]
+zoneCCumulativeFutures
+zoneCTempFutures = fcastArimaMonthlyMaxTempC$mean
+zoneCTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneCFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneCFutures) = c('Year', 'Month')
+zoneCFutures$Date = with(zoneCFutures, sprintf('%d-%02d', Year, Month))
+zoneCFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneCFutures) 
+length(zoneCPeakFutures)
+
+# since they match, we can join them
+zoneCFutures$monthlyPeakLoads = zoneCPeakFutures
+zoneCFutures$monthlyPeakLoads # yay!
+zoneCFutures$monthlyCumulativeLoads = zoneCCumulativeFutures 
+zoneCFutures$monthlyMaxTemps = zoneCTempFutures
+
+# filtering vehicle data and joining on proper zone
+carC = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'C')
+zoneCFutures = zoneCFutures %>% 
+  left_join(carC, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneCFutures$monthlyElectricVehicleImpact = zoneCFutures$value / 12 # cumulative
+zoneCFutures$monthlyCumulativeLoadsWithCar = zoneCFutures$monthlyCumulativeLoads + zoneCFutures$monthlyElectricVehicleImpact
+
+zoneCFutures$monthlyElectricVehiclePeakImpact = zoneCFutures$value / 12 / 31 # for peak loads
+zoneCFutures$monthlyPeakLoadsWithCar = zoneCFutures$monthlyPeakLoads + zoneCFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneCmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneCmonth$month_year)
+futurePlottingDat = data.frame(zoneCFutures$monthlyPeakLoadsWithCar, zoneCFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneCmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneCcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneCmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneCmonth$month_year)
+futurePlottingDat = data.frame(zoneCFutures$monthlyCumulativeLoadsWithCar, zoneCFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneCmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneCCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneCPastAndFuture = data.frame(zoneCcurrentAndForecastedPeaks, zoneCCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneCmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneCmonth$month_year)
+futurePlottingDat = data.frame(zoneCFutures$monthlyMaxTemps, zoneCFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneCmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneCPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneCPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneCPastAndFuture$zoneCcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneCPastAndFuture$zoneCCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneCPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone D
+
+```{r}
+zoneDmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'D') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneDmonth$avg_actual_MAX_TEMP = ts(zoneDmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneDmonth$avg_actual_MAX_TEMP)
+zoneDmonth$cumPeakLoad = ts(zoneDmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneDmonth$cumPeakLoad)
+autoplot(window(zoneDmonth$cumPeakLoad, start = c(2014,5)))
+zoneDmonth$maxPeakLoad = ts(zoneDmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneDmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneDmonth$maxPeakLoad = tsclean(zoneDmonth$maxPeakLoad)
+autoplot(zoneDmonth$maxPeakLoad)
+ggseasonplot(zoneDmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneDmonth$cumPeakLoad)
+gglagplot(zoneDmonth$cumPeakLoad)
+ggAcf(zoneDmonth$cumPeakLoad)
+ggtsdisplay(zoneDmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempD = auto.arima(zoneDmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempD)
+fcastArimaMonthlyMaxTempD = forecast(arimaMonthlyMaxTempD, h = 145)
+plot(fcastArimaMonthlyMaxTempD)
+
+# let's try taking the log
+arimaMonthlyCumeLoadDlog = auto.arima(window(zoneDmonth$cumPeakLoad, start = c(2014,5)), xreg = window(zoneDmonth$avg_actual_MAX_TEMP, start = c(2014,5)), lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadDlog)
+checkresiduals(arimaMonthlyCumeLoadDlog)
+
+fcastArimaMonthlyCumeLoadDlog = forecast(arimaMonthlyCumeLoadDlog, h = 145, xreg = fcastArimaMonthlyMaxTempD$mean)
+plot(fcastArimaMonthlyCumeLoadDlog, PI = FALSE) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadDlog = auto.arima(window(zoneDmonth$maxPeakLoad, start = c(2014,5)),xreg = window(zoneDmonth$avg_actual_MAX_TEMP, start = c(2014,5)), lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadDlog)
+checkresiduals(arimaMonthlyPeakLoadDlog)
+
+fcastArimaMonthlyPeakLoadDlog = forecast(arimaMonthlyPeakLoadDlog, h = 145, xreg = fcastArimaMonthlyMaxTempD$mean)
+plot(fcastArimaMonthlyPeakLoadDlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneDPeakFutures = fcastArimaMonthlyPeakLoadDlog$upper[,1] # may want to switch to $mean
+zoneDPeakFutures
+zoneDCumulativeFutures = fcastArimaMonthlyCumeLoadDlog$mean
+zoneDCumulativeFutures
+zoneDTempFutures = fcastArimaMonthlyMaxTempD$mean
+zoneDTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneDFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneDFutures) = c('Year', 'Month')
+zoneDFutures$Date = with(zoneDFutures, sprintf('%d-%02d', Year, Month))
+zoneDFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneDFutures) 
+length(zoneDPeakFutures)
+
+# since they match, we can join them
+zoneDFutures$monthlyPeakLoads = zoneDPeakFutures
+zoneDFutures$monthlyPeakLoads # yay!
+zoneDFutures$monthlyCumulativeLoads = zoneDCumulativeFutures 
+zoneDFutures$monthlyMaxTemps = zoneDTempFutures
+
+# filtering vehicle data and joining on proper zone
+carD = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'D')
+zoneDFutures = zoneDFutures %>% 
+  left_join(carD, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneDFutures$monthlyElectricVehicleImpact = zoneDFutures$value / 12 # cumulative
+zoneDFutures$monthlyCumulativeLoadsWithCar = zoneDFutures$monthlyCumulativeLoads + zoneDFutures$monthlyElectricVehicleImpact
+
+zoneDFutures$monthlyElectricVehiclePeakImpact = zoneDFutures$value / 12 / 31 # for peak loads
+zoneDFutures$monthlyPeakLoadsWithCar = zoneDFutures$monthlyPeakLoads + zoneDFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneDmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneDmonth$month_year)
+futurePlottingDat = data.frame(zoneDFutures$monthlyPeakLoadsWithCar, zoneDFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneDmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneDcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneDmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneDmonth$month_year)
+futurePlottingDat = data.frame(zoneDFutures$monthlyCumulativeLoadsWithCar, zoneDFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneDmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneDCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneDPastAndFuture = data.frame(zoneDcurrentAndForecastedPeaks, zoneDCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneDmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneDmonth$month_year)
+futurePlottingDat = data.frame(zoneDFutures$monthlyMaxTemps, zoneDFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneDmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneDPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneDPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneDPastAndFuture$zoneDcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneDPastAndFuture$zoneDCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneDPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone E
+
+```{r}
+zoneEmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'E') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneEmonth$avg_actual_MAX_TEMP = ts(zoneEmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneEmonth$avg_actual_MAX_TEMP)
+zoneEmonth$cumPeakLoad = ts(zoneEmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneEmonth$cumPeakLoad)
+zoneEmonth$maxPeakLoad = ts(zoneEmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneEmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneEmonth$maxPeakLoad = tsclean(zoneEmonth$maxPeakLoad)
+autoplot(zoneEmonth$maxPeakLoad)
+ggseasonplot(zoneEmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneEmonth$cumPeakLoad)
+gglagplot(zoneEmonth$cumPeakLoad)
+ggAcf(zoneEmonth$cumPeakLoad)
+ggtsdisplay(zoneEmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempE = auto.arima(zoneEmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempE)
+fcastArimaMonthlyMaxTempE = forecast(arimaMonthlyMaxTempE, h = 145)
+plot(fcastArimaMonthlyMaxTempE)
+
+# let's try taking the log
+arimaMonthlyCumeLoadElog = auto.arima(zoneEmonth$cumPeakLoad, xreg = zoneEmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadElog)
+checkresiduals(arimaMonthlyCumeLoadElog)
+
+fcastArimaMonthlyCumeLoadElog = forecast(arimaMonthlyCumeLoadElog, h = 145, xreg = fcastArimaMonthlyMaxTempE$mean)
+plot(fcastArimaMonthlyCumeLoadElog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadElog = auto.arima(zoneEmonth$maxPeakLoad,xreg = zoneEmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadElog)
+checkresiduals(arimaMonthlyPeakLoadElog)
+
+fcastArimaMonthlyPeakLoadElog = forecast(arimaMonthlyPeakLoadElog, h = 145, xreg = fcastArimaMonthlyMaxTempE$mean)
+plot(fcastArimaMonthlyPeakLoadElog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneEPeakFutures = fcastArimaMonthlyPeakLoadElog$mean # may want to switch to $mean
+zoneEPeakFutures
+zoneECumulativeFutures = fcastArimaMonthlyCumeLoadElog$mean
+zoneECumulativeFutures
+zoneETempFutures = fcastArimaMonthlyMaxTempE$mean
+zoneETempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneEFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneEFutures) = c('Year', 'Month')
+zoneEFutures$Date = with(zoneEFutures, sprintf('%d-%02d', Year, Month))
+zoneEFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneEFutures) 
+length(zoneEPeakFutures)
+
+# since they match, we can join them
+zoneEFutures$monthlyPeakLoads = zoneEPeakFutures
+zoneEFutures$monthlyPeakLoads # yay!
+zoneEFutures$monthlyCumulativeLoads = zoneECumulativeFutures 
+zoneEFutures$monthlyMaxTemps = zoneETempFutures
+
+# filtering vehicle data and joining on proper zone
+carE = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'E')
+zoneEFutures = zoneEFutures %>% 
+  left_join(carE, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneEFutures$monthlyElectricVehicleImpact = zoneEFutures$value / 12 # cumulative
+zoneEFutures$monthlyCumulativeLoadsWithCar = zoneEFutures$monthlyCumulativeLoads + zoneEFutures$monthlyElectricVehicleImpact
+
+zoneEFutures$monthlyElectricVehiclePeakImpact = zoneEFutures$value / 12 / 31 # for peak loads
+zoneEFutures$monthlyPeakLoadsWithCar = zoneEFutures$monthlyPeakLoads + zoneEFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneEmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneEmonth$month_year)
+futurePlottingDat = data.frame(zoneEFutures$monthlyPeakLoadsWithCar, zoneEFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneEmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneEcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneEmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneEmonth$month_year)
+futurePlottingDat = data.frame(zoneEFutures$monthlyCumulativeLoadsWithCar, zoneEFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneEmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneECurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneEPastAndFuture = data.frame(zoneEcurrentAndForecastedPeaks, zoneECurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneEmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneEmonth$month_year)
+futurePlottingDat = data.frame(zoneEFutures$monthlyMaxTemps, zoneEFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneEmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneEPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneEPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneEPastAndFuture$zoneEcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneEPastAndFuture$zoneECurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneEPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone F
+
+```{r}
+zoneFmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'F') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneFmonth$avg_actual_MAX_TEMP = ts(zoneFmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneFmonth$avg_actual_MAX_TEMP)
+zoneFmonth$cumPeakLoad = ts(zoneFmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneFmonth$cumPeakLoad)
+zoneFmonth$maxPeakLoad = ts(zoneFmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneFmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneFmonth$maxPeakLoad = tsclean(zoneFmonth$maxPeakLoad)
+autoplot(zoneFmonth$maxPeakLoad)
+ggseasonplot(zoneFmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneFmonth$cumPeakLoad)
+gglagplot(zoneFmonth$cumPeakLoad)
+ggAcf(zoneFmonth$cumPeakLoad)
+ggtsdisplay(zoneFmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempF = auto.arima(zoneFmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempF)
+fcastArimaMonthlyMaxTempF = forecast(arimaMonthlyMaxTempF, h = 145)
+plot(fcastArimaMonthlyMaxTempF)
+
+# let's try taking the log
+arimaMonthlyCumeLoadFlog = auto.arima(zoneFmonth$cumPeakLoad, xreg = zoneFmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadFlog)
+checkresiduals(arimaMonthlyCumeLoadFlog)
+
+fcastArimaMonthlyCumeLoadFlog = forecast(arimaMonthlyCumeLoadFlog, h = 145, xreg = fcastArimaMonthlyMaxTempF$mean)
+plot(fcastArimaMonthlyCumeLoadFlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadFlog = auto.arima(zoneFmonth$maxPeakLoad,xreg = zoneFmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadFlog)
+checkresiduals(arimaMonthlyPeakLoadFlog)
+
+fcastArimaMonthlyPeakLoadFlog = forecast(arimaMonthlyPeakLoadFlog, h = 145, xreg = fcastArimaMonthlyMaxTempF$mean)
+plot(fcastArimaMonthlyPeakLoadFlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneFPeakFutures = fcastArimaMonthlyPeakLoadFlog$mean # may want to switch to $mean
+zoneFPeakFutures
+zoneFCumulativeFutures = fcastArimaMonthlyCumeLoadFlog$upper[,1]
+zoneFCumulativeFutures
+zoneFTempFutures = fcastArimaMonthlyMaxTempF$mean
+zoneFTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneFFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneFFutures) = c('Year', 'Month')
+zoneFFutures$Date = with(zoneFFutures, sprintf('%d-%02d', Year, Month))
+zoneFFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneFFutures) 
+length(zoneFPeakFutures)
+
+# since they match, we can join them
+zoneFFutures$monthlyPeakLoads = zoneFPeakFutures
+zoneFFutures$monthlyPeakLoads # yay!
+zoneFFutures$monthlyCumulativeLoads = zoneFCumulativeFutures 
+zoneFFutures$monthlyMaxTemps = zoneFTempFutures
+
+# filtering vehicle data and joining on proper zone
+carF = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'F')
+zoneFFutures = zoneFFutures %>% 
+  left_join(carF, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneFFutures$monthlyElectricVehicleImpact = zoneFFutures$value / 12 # cumulative
+zoneFFutures$monthlyCumulativeLoadsWithCar = zoneFFutures$monthlyCumulativeLoads + zoneFFutures$monthlyElectricVehicleImpact
+
+zoneFFutures$monthlyElectricVehiclePeakImpact = zoneFFutures$value / 12 / 31 # for peak loads
+zoneFFutures$monthlyPeakLoadsWithCar = zoneFFutures$monthlyPeakLoads + zoneFFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneFmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneFmonth$month_year)
+futurePlottingDat = data.frame(zoneFFutures$monthlyPeakLoadsWithCar, zoneFFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneFmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneFcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneFmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneFmonth$month_year)
+futurePlottingDat = data.frame(zoneFFutures$monthlyCumulativeLoadsWithCar, zoneFFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneFmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneFCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneFPastAndFuture = data.frame(zoneFcurrentAndForecastedPeaks, zoneFCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneFmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneFmonth$month_year)
+futurePlottingDat = data.frame(zoneFFutures$monthlyMaxTemps, zoneFFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneFmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneFPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneFPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneFPastAndFuture$zoneFcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneFPastAndFuture$zoneFCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneFPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone G
+
+```{r}
+zoneGmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'G') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneGmonth$avg_actual_MAX_TEMP = ts(zoneGmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneGmonth$avg_actual_MAX_TEMP)
+zoneGmonth$cumPeakLoad = ts(zoneGmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneGmonth$cumPeakLoad)
+zoneGmonth$maxPeakLoad = ts(zoneGmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneGmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneGmonth$maxPeakLoad = tsclean(zoneGmonth$maxPeakLoad)
+autoplot(zoneGmonth$maxPeakLoad)
+ggseasonplot(zoneGmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneGmonth$cumPeakLoad)
+gglagplot(zoneGmonth$cumPeakLoad)
+ggAcf(zoneGmonth$cumPeakLoad)
+ggtsdisplay(zoneGmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempG = auto.arima(zoneGmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempG)
+fcastArimaMonthlyMaxTempG = forecast(arimaMonthlyMaxTempG, h = 145)
+plot(fcastArimaMonthlyMaxTempG)
+
+# let's try taking the log
+arimaMonthlyCumeLoadGlog = auto.arima(zoneGmonth$cumPeakLoad, xreg = zoneGmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadGlog)
+checkresiduals(arimaMonthlyCumeLoadGlog)
+
+fcastArimaMonthlyCumeLoadGlog = forecast(arimaMonthlyCumeLoadGlog, h = 145, xreg = fcastArimaMonthlyMaxTempG$mean)
+plot(fcastArimaMonthlyCumeLoadGlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadGlog = auto.arima(zoneGmonth$maxPeakLoad,xreg = zoneGmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadGlog)
+checkresiduals(arimaMonthlyPeakLoadGlog)
+
+fcastArimaMonthlyPeakLoadGlog = forecast(arimaMonthlyPeakLoadGlog, h = 145, xreg = fcastArimaMonthlyMaxTempG$mean)
+plot(fcastArimaMonthlyPeakLoadGlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneGPeakFutures = fcastArimaMonthlyPeakLoadGlog$mean # may want to switch to $mean
+zoneGPeakFutures
+zoneGCumulativeFutures = fcastArimaMonthlyCumeLoadGlog$upper[,1]
+zoneGCumulativeFutures
+zoneGTempFutures = fcastArimaMonthlyMaxTempG$mean
+zoneGTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneGFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneGFutures) = c('Year', 'Month')
+zoneGFutures$Date = with(zoneGFutures, sprintf('%d-%02d', Year, Month))
+zoneGFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneGFutures) 
+length(zoneGPeakFutures)
+
+# since they match, we can join them
+zoneGFutures$monthlyPeakLoads = zoneGPeakFutures
+zoneGFutures$monthlyPeakLoads # yay!
+zoneGFutures$monthlyCumulativeLoads = zoneGCumulativeFutures 
+zoneGFutures$monthlyMaxTemps = zoneGTempFutures
+
+# filtering vehicle data and joining on proper zone
+carG = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'G')
+zoneGFutures = zoneGFutures %>% 
+  left_join(carG, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneGFutures$monthlyElectricVehicleImpact = zoneGFutures$value / 12 # cumulative
+zoneGFutures$monthlyCumulativeLoadsWithCar = zoneGFutures$monthlyCumulativeLoads + zoneGFutures$monthlyElectricVehicleImpact
+
+zoneGFutures$monthlyElectricVehiclePeakImpact = zoneGFutures$value / 12 / 31 # for peak loads
+zoneGFutures$monthlyPeakLoadsWithCar = zoneGFutures$monthlyPeakLoads + zoneGFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneGmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneGmonth$month_year)
+futurePlottingDat = data.frame(zoneGFutures$monthlyPeakLoadsWithCar, zoneGFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneGmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneGcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneGmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneGmonth$month_year)
+futurePlottingDat = data.frame(zoneGFutures$monthlyCumulativeLoadsWithCar, zoneGFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneGmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneGCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneGPastAndFuture = data.frame(zoneGcurrentAndForecastedPeaks, zoneGCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneGmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneGmonth$month_year)
+futurePlottingDat = data.frame(zoneGFutures$monthlyMaxTemps, zoneGFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneGmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneGPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneGPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneGPastAndFuture$zoneGcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneGPastAndFuture$zoneGCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneGPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone H
+
+```{r}
+zoneHmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'H') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneHmonth$avg_actual_MAX_TEMP = ts(zoneHmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneHmonth$avg_actual_MAX_TEMP)
+zoneHmonth$cumPeakLoad = ts(zoneHmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneHmonth$cumPeakLoad)
+zoneHmonth$maxPeakLoad = ts(zoneHmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneHmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+zoneHmonth$maxPeakLoad = tsclean(zoneHmonth$maxPeakLoad)
+autoplot(zoneHmonth$maxPeakLoad)
+ggseasonplot(zoneHmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneHmonth$cumPeakLoad)
+gglagplot(zoneHmonth$cumPeakLoad)
+ggAcf(zoneHmonth$cumPeakLoad)
+ggtsdisplay(zoneHmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempH = auto.arima(zoneHmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempH)
+fcastArimaMonthlyMaxTempH = forecast(arimaMonthlyMaxTempH, h = 145)
+plot(fcastArimaMonthlyMaxTempH)
+
+# let's try taking the log
+arimaMonthlyCumeLoadHlog = auto.arima(zoneHmonth$cumPeakLoad, xreg = zoneHmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadHlog)
+checkresiduals(arimaMonthlyCumeLoadHlog)
+
+fcastArimaMonthlyCumeLoadHlog = forecast(arimaMonthlyCumeLoadHlog, h = 145, xreg = fcastArimaMonthlyMaxTempH$mean)
+plot(fcastArimaMonthlyCumeLoadHlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadHlog = auto.arima(zoneHmonth$maxPeakLoad,xreg = zoneHmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadHlog)
+checkresiduals(arimaMonthlyPeakLoadHlog)
+
+fcastArimaMonthlyPeakLoadHlog = forecast(arimaMonthlyPeakLoadHlog, h = 145, xreg = fcastArimaMonthlyMaxTempH$mean)
+plot(fcastArimaMonthlyPeakLoadHlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneHPeakFutures = fcastArimaMonthlyPeakLoadHlog$upper[,1] # may want to switch to $mean
+zoneHPeakFutures
+zoneHCumulativeFutures = fcastArimaMonthlyCumeLoadHlog$upper[,1]
+zoneHCumulativeFutures
+zoneHTempFutures = fcastArimaMonthlyMaxTempH$mean
+zoneHTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneHFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneHFutures) = c('Year', 'Month')
+zoneHFutures$Date = with(zoneGFutures, sprintf('%d-%02d', Year, Month))
+zoneHFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneHFutures) 
+length(zoneHPeakFutures)
+
+# since they match, we can join them
+zoneHFutures$monthlyPeakLoads = zoneHPeakFutures
+zoneHFutures$monthlyPeakLoads # yay!
+zoneHFutures$monthlyCumulativeLoads = zoneHCumulativeFutures 
+zoneHFutures$monthlyMaxTemps = zoneHTempFutures
+
+# filtering vehicle data and joining on proper zone
+carH = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'H')
+zoneHFutures = zoneHFutures %>% 
+  left_join(carH, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneHFutures$monthlyElectricVehicleImpact = zoneHFutures$value / 12 # cumulative
+zoneHFutures$monthlyCumulativeLoadsWithCar = zoneHFutures$monthlyCumulativeLoads + zoneHFutures$monthlyElectricVehicleImpact
+
+zoneHFutures$monthlyElectricVehiclePeakImpact = zoneHFutures$value / 12 / 31 # for peak loads
+zoneHFutures$monthlyPeakLoadsWithCar = zoneHFutures$monthlyPeakLoads + zoneHFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneHmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneHmonth$month_year)
+futurePlottingDat = data.frame(zoneHFutures$monthlyPeakLoadsWithCar, zoneHFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneHmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneHcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneHmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneHmonth$month_year)
+futurePlottingDat = data.frame(zoneHFutures$monthlyCumulativeLoadsWithCar, zoneHFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneHmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneHCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneHPastAndFuture = data.frame(zoneHcurrentAndForecastedPeaks, zoneHCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneHmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneHmonth$month_year)
+futurePlottingDat = data.frame(zoneHFutures$monthlyMaxTemps, zoneHFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneHmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneHPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneHPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneHPastAndFuture$zoneHcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneHPastAndFuture$zoneHCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneHPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone I
+
+```{r}
+zoneImonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'I') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MIN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneImonth$avg_actual_MAX_TEMP = ts(zoneImonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneImonth$avg_actual_MAX_TEMP)
+zoneImonth$cumPeakLoad = ts(zoneImonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneImonth$cumPeakLoad)
+zoneImonth$maxPeakLoad = ts(zoneImonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneImonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+#zoneImonth$maxPeakLoad = tsclean(zoneHmonth$maxPeakLoad)
+#autoplot(zoneImonth$maxPeakLoad)
+ggseasonplot(zoneImonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneImonth$cumPeakLoad)
+gglagplot(zoneImonth$cumPeakLoad)
+ggAcf(zoneImonth$cumPeakLoad)
+ggtsdisplay(zoneImonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempI = auto.arima(zoneImonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempI)
+fcastArimaMonthlyMaxTempI = forecast(arimaMonthlyMaxTempI, h = 145)
+plot(fcastArimaMonthlyMaxTempI)
+
+# let's try taking the log
+arimaMonthlyCumeLoadIlog = auto.arima(zoneImonth$cumPeakLoad, xreg = zoneImonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadIlog)
+checkresiduals(arimaMonthlyCumeLoadIlog)
+
+fcastArimaMonthlyCumeLoadIlog = forecast(arimaMonthlyCumeLoadIlog, h = 145, xreg = fcastArimaMonthlyMaxTempI$mean)
+plot(fcastArimaMonthlyCumeLoadIlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadIlog = auto.arima(zoneImonth$maxPeakLoad,xreg = zoneImonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadIlog)
+checkresiduals(arimaMonthlyPeakLoadIlog)
+
+fcastArimaMonthlyPeakLoadIlog = forecast(arimaMonthlyPeakLoadIlog, h = 145, xreg = fcastArimaMonthlyMaxTempI$mean)
+plot(fcastArimaMonthlyPeakLoadIlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneIPeakFutures = fcastArimaMonthlyPeakLoadIlog$mean # may want to switch to $mean
+zoneIPeakFutures
+zoneICumulativeFutures = fcastArimaMonthlyCumeLoadIlog$upper[,1]
+zoneICumulativeFutures
+zoneITempFutures = fcastArimaMonthlyMaxTempI$mean
+zoneITempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneIFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneIFutures) = c('Year', 'Month')
+zoneIFutures$Date = with(zoneGFutures, sprintf('%d-%02d', Year, Month))
+zoneIFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneIFutures) 
+length(zoneIPeakFutures)
+
+# since they match, we can join them
+zoneIFutures$monthlyPeakLoads = zoneIPeakFutures
+zoneIFutures$monthlyPeakLoads # yay!
+zoneIFutures$monthlyCumulativeLoads = zoneICumulativeFutures 
+zoneIFutures$monthlyMaxTemps = zoneITempFutures
+
+# filtering vehicle data and joining on proper zone
+carI = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'I')
+zoneIFutures = zoneIFutures %>% 
+  left_join(carI, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneIFutures$monthlyElectricVehicleImpact = zoneIFutures$value / 12 # cumulative
+zoneIFutures$monthlyCumulativeLoadsWithCar = zoneIFutures$monthlyCumulativeLoads + zoneIFutures$monthlyElectricVehicleImpact
+
+zoneIFutures$monthlyElectricVehiclePeakImpact = zoneIFutures$value / 12 / 31 # for peak loads
+zoneIFutures$monthlyPeakLoadsWithCar = zoneIFutures$monthlyPeakLoads + zoneIFutures$monthlyElectricVehiclePeakImpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneImonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneImonth$month_year)
+futurePlottingDat = data.frame(zoneIFutures$monthlyPeakLoadsWithCar, zoneIFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneImonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneIcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneImonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneImonth$month_year)
+futurePlottingDat = data.frame(zoneIFutures$monthlyCumulativeLoadsWithCar, zoneIFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneImonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneICurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneIPastAndFuture = data.frame(zoneIcurrentAndForecastedPeaks, zoneICurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneImonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneImonth$month_year)
+futurePlottingDat = data.frame(zoneIFutures$monthlyMaxTemps, zoneIFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneImonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneIPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneIPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneIPastAndFuture$zoneIcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneIPastAndFuture$zoneICurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneIPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# zone K
+
+```{r}
+zoneKmonth = priceLoadWeatherdat %>% 
+   filter(Abbrv_zone == 'K') %>% 
+  group_by(month_year) %>% 
+  summarize(
+        cumPeakLoad = sum(LOAD),
+        maxPeakLoad = max(LOAD),
+        peakLMBP = max(LMBP),
+        peakMCL = max(MCL),
+        peakMCC = max(MCC),
+        avg_actual_MAX_TEMP = mean(avg_actual_MAX_TEMP),
+        avg_actual_MKN_TEMP = mean(avg_actual_MIN_TEMP))
+```
+
+```{r}
+zoneKmonth$avg_actual_MAX_TEMP = ts(zoneKmonth$avg_actual_MAX_TEMP, frequency = 12, start = c(2011,11))
+autoplot(zoneKmonth$avg_actual_MAX_TEMP)
+zoneKmonth$cumPeakLoad = ts(zoneKmonth$cumPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneKmonth$cumPeakLoad)
+zoneKmonth$maxPeakLoad = ts(zoneKmonth$maxPeakLoad, frequency = 12, start = c(2011,11))
+autoplot(zoneKmonth$maxPeakLoad) # outlier, lets clean it using tsclean()
+#zoneKmonth$maxPeakLoad = tsclean(zoneHmonth$maxPeakLoad)
+#autoplot(zoneKmonth$maxPeakLoad)
+ggseasonplot(zoneKmonth$cumPeakLoad, polar = TRUE)
+ggsubseriesplot(zoneKmonth$cumPeakLoad)
+gglagplot(zoneKmonth$cumPeakLoad)
+ggAcf(zoneKmonth$cumPeakLoad)
+ggtsdisplay(zoneKmonth$cumPeakLoad)
+
+# lets start by forecasting temps
+arimaMonthlyMaxTempK = auto.arima(zoneKmonth$avg_actual_MAX_TEMP)
+summary(arimaMonthlyMaxTempK)
+fcastArimaMonthlyMaxTempK = forecast(arimaMonthlyMaxTempK, h = 145)
+plot(fcastArimaMonthlyMaxTempK)
+
+# let's try taking the log
+arimaMonthlyCumeLoadKlog = auto.arima(zoneKmonth$cumPeakLoad, xreg = zoneKmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyCumeLoadKlog)
+checkresiduals(arimaMonthlyCumeLoadKlog)
+
+fcastArimaMonthlyCumeLoadKlog = forecast(arimaMonthlyCumeLoadKlog, h = 145, xreg = fcastArimaMonthlyMaxTempK$mean)
+plot(fcastArimaMonthlyCumeLoadKlog) # actually looks pretty good
+
+# what if we do the logs?
+arimaMonthlyPeakLoadKlog = auto.arima(zoneKmonth$maxPeakLoad,xreg = zoneKmonth$avg_actual_MAX_TEMP, lambda = 0, biasadj = TRUE)
+summary(arimaMonthlyPeakLoadKlog)
+checkresiduals(arimaMonthlyPeakLoadKlog)
+
+fcastArimaMonthlyPeakLoadKlog = forecast(arimaMonthlyPeakLoadKlog, h = 145, xreg = fcastArimaMonthlyMaxTempK$mean)
+plot(fcastArimaMonthlyPeakLoadKlog, PI = TRUE) 
+```
+
+```{r}
+# store the future vectors
+zoneKPeakFutures = fcastArimaMonthlyPeakLoadKlog$mean # may want to switch to $mean
+zoneKPeakFutures
+zoneKCumulativeFutures = fcastArimaMonthlyCumeLoadKlog$upper[,1]
+zoneKCumulativeFutures
+zoneKTempFutures = fcastArimaMonthlyMaxTempK$mean
+zoneKTempFutures
+
+dateVec = seq.Date(from = as.Date('2018/12/01'), to = as.Date('2030/12/01'), by = 'month')
+dateVec
+dateVec = ymd(dateVec)
+dateVecYear = year(dateVec)
+dateVecYear
+dateVecMonth = month(dateVec)
+dateVecMonth
+zoneKFutures = data.frame(dateVecYear,dateVecMonth)
+names(zoneKFutures) = c('Year', 'Month')
+zoneKFutures$Date = with(zoneGFutures, sprintf('%d-%02d', Year, Month))
+zoneKFutures$Date
+
+# lets check to see if we have the same lengths and can bind these components
+nrow(zoneKFutures) 
+length(zoneKPeakFutures)
+
+# since they match, we can join them
+zoneKFutures$monthlyPeakLoads = zoneKPeakFutures
+zoneKFutures$monthlyPeakLoads # yay!
+zoneKFutures$monthlyCumulativeLoads = zoneKCumulativeFutures 
+zoneKFutures$monthlyMaxTemps = zoneKTempFutures
+
+# filtering vehicle data and joining on proper zone
+carK = Electric_car_long_2019_to_2030 %>% 
+  filter(zone == 'K')
+zoneKFutures = zoneKFutures %>% 
+  left_join(carK, by = c('Year' = 'Year'))
+
+# next add on the values
+zoneKFutures$monthlyElectricVehicleKmpact = zoneKFutures$value / 12 # cumulative
+zoneKFutures$monthlyCumulativeLoadsWithCar = zoneKFutures$monthlyCumulativeLoads + zoneKFutures$monthlyElectricVehicleKmpact
+
+zoneKFutures$monthlyElectricVehiclePeakKmpact = zoneKFutures$value / 12 / 31 # for peak loads
+zoneKFutures$monthlyPeakLoadsWithCar = zoneKFutures$monthlyPeakLoads + zoneKFutures$monthlyElectricVehiclePeakKmpact
+```
+
+```{r}
+# for peaks
+currentPeaks = as.numeric(zoneKmonth$maxPeakLoad)
+currentPeaks
+plottingData = data.frame(currentPeaks,zoneKmonth$month_year)
+futurePlottingDat = data.frame(zoneKFutures$monthlyPeakLoadsWithCar, zoneKFutures$Date)
+names(futurePlottingDat) = c('currentPeaks', 'zoneKmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentPeaks = ts(plottingData$currentPeaks, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentPeaks)
+
+zoneKcurrentAndForecastedPeaks = plottingData$currentPeaks
+
+# for cumulative
+currentCumes = as.numeric(zoneKmonth$cumPeakLoad)
+currentCumes
+plottingData = data.frame(currentCumes,zoneKmonth$month_year)
+futurePlottingDat = data.frame(zoneKFutures$monthlyCumulativeLoadsWithCar, zoneKFutures$Date)
+names(futurePlottingDat) = c('currentCumes', 'zoneKmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentCumes = ts(plottingData$currentCumes, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentCumes / 1000) + theme_classic()
+
+zoneKCurrentAndForecastedCumeulativeLoads = plottingData$currentCumes
+
+zoneKPastAndFuture = data.frame(zoneKcurrentAndForecastedPeaks, zoneKCurrentAndForecastedCumeulativeLoads)
+
+currentTemps = as.numeric(zoneKmonth$avg_actual_MAX_TEMP)
+currentTemps
+plottingData = data.frame(currentTemps,zoneKmonth$month_year)
+futurePlottingDat = data.frame(zoneKFutures$monthlyMaxTemps, zoneKFutures$Date)
+names(futurePlottingDat) = c('currentTemps', 'zoneKmonth.month_year')
+plottingData = rbind(plottingData, futurePlottingDat)
+plottingData$currentTemps = ts(plottingData$currentTemps, frequency = 12, start = c(2011, 11))
+autoplot(plottingData$currentTemps) + theme_classic()
+
+zoneKPastAndFuture$avgMaxTemps = plottingData$currentTemps
+zoneKPastAndFuture
+
+cbind("Monthly Peak Demands (MWh)" = zoneKPastAndFuture$zoneKcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneKPastAndFuture$zoneKCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneKPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+
+# examples of plots
+
+```{r}
+# zone A
+plot(fcastLoadA)
+plot(fcastFourierLoadAlog)
+plot(fcastArimaMonthlyMaxTempA)
+plot(fcastArimaMonthlyCumeLoadAlog)
 plot(fcastArimaMonthlyPeakLoadAlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneAPastAndFuture$zoneAcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneAPastAndFuture$zoneACurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneAPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempA)
+checkresiduals(arimaMonthlyCumeLoadAlog)
+checkresiduals(arimaMonthlyPeakLoadAlog)
+
+
+# zone B
+plot(fcastArimaMonthlyMaxTempB)
+plot(fcastArimaMonthlyCumeLoadBlog)
+plot(fcastArimaMonthlyPeakLoadBlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneBPastAndFuture$zoneBcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneBPastAndFuture$zoneBCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneBPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempB)
+checkresiduals(arimaMonthlyCumeLoadBlog)
+checkresiduals(arimaMonthlyPeakLoadBlog)
+
+
+# Zone C
+plot(fcastArimaMonthlyMaxTempC)
+plot(fcastArimaMonthlyCumeLoadClog)
+plot(fcastArimaMonthlyPeakLoadClog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneCPastAndFuture$zoneCcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneCPastAndFuture$zoneCCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneCPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempC)
+checkresiduals(arimaMonthlyCumeLoadClog)
+checkresiduals(arimaMonthlyPeakLoadClog)
+
+# zone D
+plot(fcastArimaMonthlyMaxTempD)
+plot(fcastArimaMonthlyCumeLoadDlog)
+plot(fcastArimaMonthlyPeakLoadDlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneDPastAndFuture$zoneDcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneDPastAndFuture$zoneDCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneDPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempD)
+checkresiduals(arimaMonthlyCumeLoadDlog)
+checkresiduals(arimaMonthlyPeakLoadDlog)
+
+# zone E
+plot(fcastArimaMonthlyMaxTempE)
+plot(fcastArimaMonthlyCumeLoadElog)
+plot(fcastArimaMonthlyPeakLoadElog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneEPastAndFuture$zoneEcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneEPastAndFuture$zoneECurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneEPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempE)
+checkresiduals(arimaMonthlyCumeLoadElog)
+checkresiduals(arimaMonthlyPeakLoadElog)
+
+# zone F
+plot(fcastArimaMonthlyMaxTempF)
+plot(fcastArimaMonthlyCumeLoadFlog)
+plot(fcastArimaMonthlyPeakLoadFlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneFPastAndFuture$zoneFcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneFPastAndFuture$zoneFCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneFPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempF)
+checkresiduals(arimaMonthlyCumeLoadFlog)
+checkresiduals(arimaMonthlyPeakLoadFlog)
+
+# zone G
+plot(fcastArimaMonthlyMaxTempG)
+plot(fcastArimaMonthlyCumeLoadGlog)
+plot(fcastArimaMonthlyPeakLoadGlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneGPastAndFuture$zoneGcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneGPastAndFuture$zoneGCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneGPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempG)
+checkresiduals(arimaMonthlyCumeLoadGlog)
+checkresiduals(arimaMonthlyPeakLoadGlog)
+
+# zone H
+plot(fcastArimaMonthlyMaxTempH)
+plot(fcastArimaMonthlyCumeLoadHlog)
+plot(fcastArimaMonthlyPeakLoadHlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneHPastAndFuture$zoneHcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneHPastAndFuture$zoneHCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneHPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempH)
+checkresiduals(arimaMonthlyCumeLoadHlog)
+checkresiduals(arimaMonthlyPeakLoadHlog)
+
+# zone I
+plot(fcastArimaMonthlyMaxTempI)
+plot(fcastArimaMonthlyCumeLoadIlog)
+plot(fcastArimaMonthlyPeakLoadIlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneIPastAndFuture$zoneIcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneIPastAndFuture$zoneICurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneIPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempI)
+checkresiduals(arimaMonthlyCumeLoadIlog)
+checkresiduals(arimaMonthlyPeakLoadIlog)
+
+# Zone J
+plot(fcastArimaMonthlyMaxTempJ)
+plot(fcastArimaMonthlyCumeLoadJlog)
+plot(fcastArimaMonthlyPeakLoadJlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneJPastAndFuture$zoneJcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneJPastAndFuture$zoneJCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneJPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempJ)
+checkresiduals(arimaMonthlyCumeLoadJlog)
+checkresiduals(arimaMonthlyPeakLoadJlog)
+
+# Zone K
+plot(fcastArimaMonthlyMaxTempK)
+plot(fcastArimaMonthlyCumeLoadKlog)
+plot(fcastArimaMonthlyPeakLoadKlog)
+
+# forecasts
+cbind("Monthly Peak Demands (MWh)" = zoneKPastAndFuture$zoneKcurrentAndForecastedPeaks,
+      "Monthly Cumulative Demands (GWh)" = zoneKPastAndFuture$zoneKCurrentAndForecastedCumeulativeLoads / 1000,
+      "Monthly average max temperatures" = zoneKPastAndFuture$avgMaxTemps) %>% 
+  autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+
+# residual diagnostics
+checkresiduals(arimaMonthlyMaxTempK)
+checkresiduals(arimaMonthlyCumeLoadKlog)
+checkresiduals(arimaMonthlyPeakLoadKlog)
+```
+
+# let's try using facebook's prophet library which can work on sub-daily data
+
+Note, this is commented out because it takes a long time to run/uses a buuuunch of memory
+
+```{r}
+# zoneAsubDaily = priceLoadWeatherdat %>% 
+#   filter(Abbrv_zone == 'A') %>% 
+#   group_by(DATE_TIME) %>% 
+#   summarize(load = sum(LOAD),
+#             avgLMBP = mean(LMBP),
+#             peakLMBP = max(LMBP),
+#             peakMCL = max(MCL),
+#             peakMCC = max(MCC),
+#             max_actual_MAX_TEMP = max(avg_actual_MAX_TEMP),
+#             min_actual_MIN_TEMP = min(avg_actual_MIN_TEMP))
+# zoneAsubDaily = zoneAsubDaily %>% 
+#   rename(
+#     y = load,
+#     ds = DATE_TIME,
+#   )
+# zoneAProphetMod = prophet(zoneAsubDaily[,1:2])
+# zoneAProphetPreds = make_future_dataframe(zoneAProphetMod, periods = 105120, freq = 3600)
+# zoneAProphetFcst = predict(zoneAProphetMod, zoneAProphetPreds)
+# plot(zoneAProphetMod, zoneAProphetFcst)
+# plot(zoneAProphetMod, zoneAProphetFcst, PI = FALSE)
+# prophet_plot_components(zoneAProphetMod, zoneAProphetFcst)
 ```
 

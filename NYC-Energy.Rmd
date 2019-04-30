@@ -2169,7 +2169,7 @@ dateVecMonth = month(dateVec)
 dateVecMonth
 zoneKFutures = data.frame(dateVecYear,dateVecMonth)
 names(zoneKFutures) = c('Year', 'Month')
-zoneKFutures$Date = with(zoneGFutures, sprintf('%d-%02d', Year, Month))
+zoneKFutures$Date = with(zoneKFutures, sprintf('%d-%02d', Year, Month))
 zoneKFutures$Date
 
 # lets check to see if we have the same lengths and can bind these components
@@ -2239,6 +2239,805 @@ cbind("Monthly Peak Demands (MWh)" = zoneKPastAndFuture$zoneKcurrentAndForecaste
       "Monthly Cumulative Demands (GWh)" = zoneKPastAndFuture$zoneKCurrentAndForecastedCumeulativeLoads / 1000,
       "Monthly average max temperatures" = zoneKPastAndFuture$avgMaxTemps) %>% 
   autoplot(facets=TRUE) + xlab("Year") + ylab("") + theme_classic()
+```
+
+# forecasting supply side
+
+```{r}
+pastAndFutureGenSites = read.csv('Planned and past Gen Facilities.csv')
+
+#Filter out Renewable Type 1 facilities
+nonRenewables <- pastAndFutureGenSites%>%
+  filter(Type.1 != "MTE" & Type.1 != "REF" & Type.1 != "SUN" & Type.1 != "WAT" & Type.1 != "WND" & Type.1 != "WD")
+
+summary(nonRenewables)
+
+renewables <- pastAndFutureGenSites %>% #The pipe filter below retains only renewables
+  filter(Type.1 == "MTE" | Type.1 == "REF" | Type.1 == "SUN" | Type.1 == "WAT" | Type.1 == "WND" | Type.1 == "WD")
+
+renewables$renewable = 'yes'
+nonRenewables$renewable = 'no'
+pastAndFutureGenSites = rbind(renewables, nonRenewables)
+dateKeys = seq(732,43820)
+dateDates = seq(as.Date("1902-01-01"),as.Date("2019-12-21"), by = 1)
+generatingDates = data.frame(dateKeys,dateDates)
+generatingDates$In.Service.Date = generatingDates$dateKeys
+generatingDates = subset(generatingDates, select = -dateKeys)
+pastAndFutureGenSites = pastAndFutureGenSites %>% 
+  left_join(generatingDates)
+pastAndFutureGenSites$dateDates = format(pastAndFutureGenSites$dateDates, "%Y-%m")
+
+# now to create cumulative columns by zone
+pastAndFutureGenSites = pastAndFutureGenSites %>% 
+  arrange((dateDates))
+
+pastAndFutureGenSitesA = pastAndFutureGenSites %>% 
+  filter(Zone == 'A')
+
+  pastAndFutureGenSitesA$cumNPR_MW = cumsum(pastAndFutureGenSitesA$NPR_MW)
+  pastAndFutureGenSitesA$cumSummer = cumsum(pastAndFutureGenSitesA$Sum)
+  pastAndFutureGenSitesA$cumWinter = cumsum(pastAndFutureGenSitesA$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesA$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesA$cumSummer_Renewable = 0
+  pastAndFutureGenSitesA$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesA)){
+    isRenewable = pastAndFutureGenSitesA[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesA[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesA[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesA[i,7]
+    }
+    pastAndFutureGenSitesA[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesA[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesA[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesA$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesA$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesA$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesA$cumSummer_Renewable)
+  pastAndFutureGenSitesA$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesA$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesA$cumNPR_MW_NonRenewable = pastAndFutureGenSitesA$cumNPR_MW - pastAndFutureGenSitesA$cumNPR_MW_Renewable
+  pastAndFutureGenSitesA$cumSummer_NonRenewable = pastAndFutureGenSitesA$cumSummer - pastAndFutureGenSitesA$cumSummer_Renewable
+  pastAndFutureGenSitesA$cumWinter_NonRenewable = pastAndFutureGenSitesA$cumWinter - pastAndFutureGenSitesA$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneAFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneAFutures) = c('Year', 'Month')
+  zoneAFutures$Date = with(zoneAFutures, sprintf('%d-%02d', Year, Month))
+  zoneAFutures$Date
+  
+  pastAndFutureGenSitesA = pastAndFutureGenSitesA %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesA)[1] = ('Date')
+  
+  pastAndFutureGenSitesA = zoneAFutures %>% 
+    left_join(pastAndFutureGenSitesA)
+  
+  pastAndFutureGenSitesA = pastAndFutureGenSitesA %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesA = pastAndFutureGenSitesA %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesA$Year = NULL
+  pastAndFutureGenSitesA$Month = NULL
+  pastAndFutureGenSitesA$Zone = 'A'
+  
+  pastAndFutureGenSitesA = pastAndFutureGenSitesA %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'A')
+  pastAndFutureGenSitesA$DateTime = dateVec
+  pastAndFutureGenSitesA = pastAndFutureGenSitesA %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+  #zoneAFutures$cumNPR_MW = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),13]
+  #zoneAFutures$cumSummer = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),14]
+  #zoneAFutures$cumWinter = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),15]
+  #zoneAFutures$cumNPR_MW_Renewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),16]
+  #zoneAFutures$cumSummer_Renewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),17]
+  #zoneAFutures$cumWinter_Renewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),18]
+  #zoneAFutures$cumNPR_MW_NonRenewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),19]
+  #zoneAFutures$cumSummer_NonRenewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),20]
+  #zoneAFutures$cumWinter_NonRenewable = pastAndFutureGenSitesA[nrow(pastAndFutureGenSitesA),21]
+  
+  
+  
+```
+
+# supply zone b
+
+```{r}
+pastAndFutureGenSitesB = pastAndFutureGenSites %>% 
+  filter(Zone == 'B')
+
+  pastAndFutureGenSitesB$cumNPR_MW = cumsum(pastAndFutureGenSitesB$NPR_MW)
+  pastAndFutureGenSitesB$cumSummer = cumsum(pastAndFutureGenSitesB$Sum)
+  pastAndFutureGenSitesB$cumWinter = cumsum(pastAndFutureGenSitesB$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesB$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesB$cumSummer_Renewable = 0
+  pastAndFutureGenSitesB$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesB)){
+    isRenewable = pastAndFutureGenSitesB[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesB[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesB[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesB[i,7]
+    }
+    pastAndFutureGenSitesB[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesB[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesB[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesB$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesB$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesB$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesB$cumSummer_Renewable)
+  pastAndFutureGenSitesB$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesB$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesB$cumNPR_MW_NonRenewable = pastAndFutureGenSitesB$cumNPR_MW - pastAndFutureGenSitesB$cumNPR_MW_Renewable
+  pastAndFutureGenSitesB$cumSummer_NonRenewable = pastAndFutureGenSitesB$cumSummer - pastAndFutureGenSitesB$cumSummer_Renewable
+  pastAndFutureGenSitesB$cumWinter_NonRenewable = pastAndFutureGenSitesB$cumWinter - pastAndFutureGenSitesB$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesB = pastAndFutureGenSitesB %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesB)[1] = ('Date')
+  
+  pastAndFutureGenSitesB = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesB)
+  
+  pastAndFutureGenSitesB = pastAndFutureGenSitesB %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesB = pastAndFutureGenSitesB %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesB$Year = NULL
+  pastAndFutureGenSitesB$Month = NULL
+  pastAndFutureGenSitesB$Zone = 'B'
+  
+   pastAndFutureGenSitesB = pastAndFutureGenSitesB %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable),zone = 'B')
+  pastAndFutureGenSitesB$DateTime = dateVec
+  pastAndFutureGenSitesB = pastAndFutureGenSitesB %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone C
+
+```{r}
+pastAndFutureGenSitesC = pastAndFutureGenSites %>% 
+  filter(Zone == 'C')
+
+  pastAndFutureGenSitesC$cumNPR_MW = cumsum(pastAndFutureGenSitesC$NPR_MW)
+  pastAndFutureGenSitesC$cumSummer = cumsum(pastAndFutureGenSitesC$Sum)
+  pastAndFutureGenSitesC$cumWinter = cumsum(pastAndFutureGenSitesC$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesC$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesC$cumSummer_Renewable = 0
+  pastAndFutureGenSitesC$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesC)){
+    isRenewable = pastAndFutureGenSitesC[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesC[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesC[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesC[i,7]
+    }
+    pastAndFutureGenSitesC[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesC[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesC[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesC$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesC$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesC$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesC$cumSummer_Renewable)
+  pastAndFutureGenSitesC$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesC$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesC$cumNPR_MW_NonRenewable = pastAndFutureGenSitesC$cumNPR_MW - pastAndFutureGenSitesC$cumNPR_MW_Renewable
+  pastAndFutureGenSitesC$cumSummer_NonRenewable = pastAndFutureGenSitesC$cumSummer - pastAndFutureGenSitesC$cumSummer_Renewable
+  pastAndFutureGenSitesC$cumWinter_NonRenewable = pastAndFutureGenSitesC$cumWinter - pastAndFutureGenSitesC$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesC = pastAndFutureGenSitesC %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesC)[1] = ('Date')
+  
+  pastAndFutureGenSitesC = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesC)
+  
+  pastAndFutureGenSitesC = pastAndFutureGenSitesC %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesC = pastAndFutureGenSitesC %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesC$Year = NULL
+  pastAndFutureGenSitesC$Month = NULL
+  pastAndFutureGenSitesC$Zone = 'C'
+  
+   pastAndFutureGenSitesC = pastAndFutureGenSitesC %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'C')
+  pastAndFutureGenSitesC$DateTime = dateVec
+  pastAndFutureGenSitesC = pastAndFutureGenSitesC %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone d
+
+```{r}
+pastAndFutureGenSitesD = pastAndFutureGenSites %>% 
+  filter(Zone == 'D')
+
+  pastAndFutureGenSitesD$cumNPR_MW = cumsum(pastAndFutureGenSitesD$NPR_MW)
+  pastAndFutureGenSitesD$cumSummer = cumsum(pastAndFutureGenSitesD$Sum)
+  pastAndFutureGenSitesD$cumWinter = cumsum(pastAndFutureGenSitesD$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesD$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesD$cumSummer_Renewable = 0
+  pastAndFutureGenSitesD$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesD)){
+    isRenewable = pastAndFutureGenSitesD[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesD[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesD[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesD[i,7]
+    }
+    pastAndFutureGenSitesD[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesD[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesD[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesD$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesD$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesD$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesD$cumSummer_Renewable)
+  pastAndFutureGenSitesD$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesD$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesD$cumNPR_MW_NonRenewable = pastAndFutureGenSitesD$cumNPR_MW - pastAndFutureGenSitesD$cumNPR_MW_Renewable
+  pastAndFutureGenSitesD$cumSummer_NonRenewable = pastAndFutureGenSitesD$cumSummer - pastAndFutureGenSitesD$cumSummer_Renewable
+  pastAndFutureGenSitesD$cumWinter_NonRenewable = pastAndFutureGenSitesD$cumWinter - pastAndFutureGenSitesD$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesD = pastAndFutureGenSitesD %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesD)[1] = ('Date')
+  
+  pastAndFutureGenSitesD = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesD)
+  
+  pastAndFutureGenSitesD = pastAndFutureGenSitesD %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesD = pastAndFutureGenSitesD %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesD$Year = NULL
+  pastAndFutureGenSitesD$Month = NULL
+  pastAndFutureGenSitesD$Zone = 'D'
+  
+   pastAndFutureGenSitesD = pastAndFutureGenSitesD %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'D')
+  pastAndFutureGenSitesD$DateTime = dateVec
+  pastAndFutureGenSitesD = pastAndFutureGenSitesD %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone e
+
+```{r}
+pastAndFutureGenSitesE = pastAndFutureGenSites %>% 
+  filter(Zone == 'E')
+
+  pastAndFutureGenSitesE$cumNPR_MW = cumsum(pastAndFutureGenSitesE$NPR_MW)
+  pastAndFutureGenSitesE$cumSummer = cumsum(pastAndFutureGenSitesE$Sum)
+  pastAndFutureGenSitesE$cumWinter = cumsum(pastAndFutureGenSitesE$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesE$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesE$cumSummer_Renewable = 0
+  pastAndFutureGenSitesE$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesE)){
+    isRenewable = pastAndFutureGenSitesE[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesE[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesE[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesE[i,7]
+    }
+    pastAndFutureGenSitesE[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesE[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesE[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesE$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesE$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesE$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesE$cumSummer_Renewable)
+  pastAndFutureGenSitesE$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesE$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesE$cumNPR_MW_NonRenewable = pastAndFutureGenSitesE$cumNPR_MW - pastAndFutureGenSitesE$cumNPR_MW_Renewable
+  pastAndFutureGenSitesE$cumSummer_NonRenewable = pastAndFutureGenSitesE$cumSummer - pastAndFutureGenSitesE$cumSummer_Renewable
+  pastAndFutureGenSitesE$cumWinter_NonRenewable = pastAndFutureGenSitesE$cumWinter - pastAndFutureGenSitesE$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesE = pastAndFutureGenSitesE %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesE)[1] = ('Date')
+  
+  pastAndFutureGenSitesE = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesE)
+  
+  pastAndFutureGenSitesE = pastAndFutureGenSitesE %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesE = pastAndFutureGenSitesE %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesE$Year = NULL
+  pastAndFutureGenSitesE$Month = NULL
+  pastAndFutureGenSitesE$Zone = 'E'
+  
+   pastAndFutureGenSitesE = pastAndFutureGenSitesE %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'E')
+  pastAndFutureGenSitesE$DateTime = dateVec
+  pastAndFutureGenSitesE = pastAndFutureGenSitesE %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone f
+
+```{r}
+pastAndFutureGenSitesF = pastAndFutureGenSites %>% 
+  filter(Zone == 'F')
+
+  pastAndFutureGenSitesF$cumNPR_MW = cumsum(pastAndFutureGenSitesF$NPR_MW)
+  pastAndFutureGenSitesF$cumSummer = cumsum(pastAndFutureGenSitesF$Sum)
+  pastAndFutureGenSitesF$cumWinter = cumsum(pastAndFutureGenSitesF$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesF$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesF$cumSummer_Renewable = 0
+  pastAndFutureGenSitesF$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesF)){
+    isRenewable = pastAndFutureGenSitesF[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesF[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesF[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesF[i,7]
+    }
+    pastAndFutureGenSitesF[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesF[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesF[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesF$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesF$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesF$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesF$cumSummer_Renewable)
+  pastAndFutureGenSitesF$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesF$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesF$cumNPR_MW_NonRenewable = pastAndFutureGenSitesF$cumNPR_MW - pastAndFutureGenSitesF$cumNPR_MW_Renewable
+  pastAndFutureGenSitesF$cumSummer_NonRenewable = pastAndFutureGenSitesF$cumSummer - pastAndFutureGenSitesF$cumSummer_Renewable
+  pastAndFutureGenSitesF$cumWinter_NonRenewable = pastAndFutureGenSitesF$cumWinter - pastAndFutureGenSitesF$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesF = pastAndFutureGenSitesF %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesF)[1] = ('Date')
+  
+  pastAndFutureGenSitesF = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesF)
+  
+  pastAndFutureGenSitesF = pastAndFutureGenSitesF %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesF = pastAndFutureGenSitesF %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesF$Year = NULL
+  pastAndFutureGenSitesF$Month = NULL
+  pastAndFutureGenSitesF$Zone = 'F'
+  
+   pastAndFutureGenSitesF = pastAndFutureGenSitesF %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'F')
+  pastAndFutureGenSitesF$DateTime = dateVec
+  pastAndFutureGenSitesF = pastAndFutureGenSitesF %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone g
+
+```{r}
+pastAndFutureGenSitesG = pastAndFutureGenSites %>% 
+  filter(Zone == 'G')
+
+  pastAndFutureGenSitesG$cumNPR_MW = cumsum(pastAndFutureGenSitesG$NPR_MW)
+  pastAndFutureGenSitesG$cumSummer = cumsum(pastAndFutureGenSitesG$Sum)
+  pastAndFutureGenSitesG$cumWinter = cumsum(pastAndFutureGenSitesG$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesG$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesG$cumSummer_Renewable = 0
+  pastAndFutureGenSitesG$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesG)){
+    isRenewable = pastAndFutureGenSitesG[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesG[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesG[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesG[i,7]
+    }
+    pastAndFutureGenSitesG[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesG[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesG[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesG$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesG$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesG$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesG$cumSummer_Renewable)
+  pastAndFutureGenSitesG$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesG$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesG$cumNPR_MW_NonRenewable = pastAndFutureGenSitesG$cumNPR_MW - pastAndFutureGenSitesG$cumNPR_MW_Renewable
+  pastAndFutureGenSitesG$cumSummer_NonRenewable = pastAndFutureGenSitesG$cumSummer - pastAndFutureGenSitesG$cumSummer_Renewable
+  pastAndFutureGenSitesG$cumWinter_NonRenewable = pastAndFutureGenSitesG$cumWinter - pastAndFutureGenSitesG$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesG = pastAndFutureGenSitesG %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesG)[1] = ('Date')
+  
+  pastAndFutureGenSitesG = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesG)
+  
+  pastAndFutureGenSitesG = pastAndFutureGenSitesG %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesG = pastAndFutureGenSitesG %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesG$Year = NULL
+  pastAndFutureGenSitesG$Month = NULL
+  pastAndFutureGenSitesG$Zone = 'G'
+  
+   pastAndFutureGenSitesG = pastAndFutureGenSitesG %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'G')
+  pastAndFutureGenSitesG$DateTime = dateVec
+  pastAndFutureGenSitesG = pastAndFutureGenSitesG %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone h
+
+```{r}
+pastAndFutureGenSitesH = pastAndFutureGenSites %>% 
+  filter(Zone == 'H')
+
+  pastAndFutureGenSitesH$cumNPR_MW = cumsum(pastAndFutureGenSitesH$NPR_MW)
+  pastAndFutureGenSitesH$cumSummer = cumsum(pastAndFutureGenSitesH$Sum)
+  pastAndFutureGenSitesH$cumWinter = cumsum(pastAndFutureGenSitesH$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesH$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesH$cumSummer_Renewable = 0
+  pastAndFutureGenSitesH$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesH)){
+    isRenewable = pastAndFutureGenSitesH[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesH[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesH[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesH[i,7]
+    }
+    pastAndFutureGenSitesH[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesH[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesH[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesH$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesH$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesH$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesH$cumSummer_Renewable)
+  pastAndFutureGenSitesH$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesH$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesH$cumNPR_MW_NonRenewable = pastAndFutureGenSitesH$cumNPR_MW - pastAndFutureGenSitesH$cumNPR_MW_Renewable
+  pastAndFutureGenSitesH$cumSummer_NonRenewable = pastAndFutureGenSitesH$cumSummer - pastAndFutureGenSitesH$cumSummer_Renewable
+  pastAndFutureGenSitesH$cumWinter_NonRenewable = pastAndFutureGenSitesH$cumWinter - pastAndFutureGenSitesH$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesH = pastAndFutureGenSitesH %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesH)[1] = ('Date')
+  
+  pastAndFutureGenSitesH = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesH)
+  
+  pastAndFutureGenSitesH = pastAndFutureGenSitesH %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesH = pastAndFutureGenSitesH %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesH$Year = NULL
+  pastAndFutureGenSitesH$Month = NULL
+  pastAndFutureGenSitesH$Zone = 'H'
+  
+   pastAndFutureGenSitesH = pastAndFutureGenSitesH %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'H')
+  pastAndFutureGenSitesH$DateTime = dateVec
+  pastAndFutureGenSitesH = pastAndFutureGenSitesH %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone i
+
+```{r}
+pastAndFutureGenSitesI = pastAndFutureGenSites %>% 
+  filter(Zone == 'I')
+
+  pastAndFutureGenSitesI$cumNPR_MW = cumsum(pastAndFutureGenSitesI$NPR_MW)
+  pastAndFutureGenSitesI$cumSummer = cumsum(pastAndFutureGenSitesI$Sum)
+  pastAndFutureGenSitesI$cumWinter = cumsum(pastAndFutureGenSitesI$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesI$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesI$cumSummer_Renewable = 0
+  pastAndFutureGenSitesI$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesI)){
+    isRenewable = pastAndFutureGenSitesI[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesI[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesI[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesI[i,7]
+    }
+    pastAndFutureGenSitesI[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesI[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesI[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesI$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesI$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesI$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesI$cumSummer_Renewable)
+  pastAndFutureGenSitesI$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesI$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesI$cumNPR_MW_NonRenewable = pastAndFutureGenSitesI$cumNPR_MW - pastAndFutureGenSitesI$cumNPR_MW_Renewable
+  pastAndFutureGenSitesI$cumSummer_NonRenewable = pastAndFutureGenSitesI$cumSummer - pastAndFutureGenSitesI$cumSummer_Renewable
+  pastAndFutureGenSitesI$cumWinter_NonRenewable = pastAndFutureGenSitesI$cumWinter - pastAndFutureGenSitesI$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesI = pastAndFutureGenSitesI %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesI)[1] = ('Date')
+  
+  pastAndFutureGenSitesI = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesI)
+  
+  pastAndFutureGenSitesI = pastAndFutureGenSitesI %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesI = pastAndFutureGenSitesI %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesI$Year = NULL
+  pastAndFutureGenSitesI$Month = NULL
+  pastAndFutureGenSitesI$Zone = 'I'
+  
+   pastAndFutureGenSitesI = pastAndFutureGenSitesI %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable),zone = 'I')
+  pastAndFutureGenSitesI$DateTime = dateVec
+  pastAndFutureGenSitesI = pastAndFutureGenSitesI %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+# supply zone j
+
+```{r}
+pastAndFutureGenSitesJ = pastAndFutureGenSites %>% 
+  filter(Zone == 'J')
+
+  pastAndFutureGenSitesJ$cumNPR_MW = cumsum(pastAndFutureGenSitesJ$NPR_MW)
+  pastAndFutureGenSitesJ$cumSummer = cumsum(pastAndFutureGenSitesJ$Sum)
+  pastAndFutureGenSitesJ$cumWinter = cumsum(pastAndFutureGenSitesJ$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesJ$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesJ$cumSummer_Renewable = 0
+  pastAndFutureGenSitesJ$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesJ)){
+    isRenewable = pastAndFutureGenSitesJ[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesJ[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesJ[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesJ[i,7]
+    }
+    pastAndFutureGenSitesJ[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesJ[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesJ[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesJ$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesJ$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesJ$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesJ$cumSummer_Renewable)
+  pastAndFutureGenSitesJ$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesJ$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesJ$cumNPR_MW_NonRenewable = pastAndFutureGenSitesJ$cumNPR_MW - pastAndFutureGenSitesJ$cumNPR_MW_Renewable
+  pastAndFutureGenSitesJ$cumSummer_NonRenewable = pastAndFutureGenSitesJ$cumSummer - pastAndFutureGenSitesJ$cumSummer_Renewable
+  pastAndFutureGenSitesJ$cumWinter_NonRenewable = pastAndFutureGenSitesJ$cumWinter - pastAndFutureGenSitesJ$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesJ = pastAndFutureGenSitesJ %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesJ)[1] = ('Date')
+  
+  pastAndFutureGenSitesJ = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesJ)
+  
+  pastAndFutureGenSitesJ = pastAndFutureGenSitesJ %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesJ = pastAndFutureGenSitesJ %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesJ$Year = NULL
+  pastAndFutureGenSitesJ$Month = NULL
+  pastAndFutureGenSitesJ$Zone = 'J'
+  
+   pastAndFutureGenSitesJ = pastAndFutureGenSitesJ %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable),zone = 'J')
+  pastAndFutureGenSitesJ$DateTime = dateVec
+  pastAndFutureGenSitesJ = pastAndFutureGenSitesJ %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
+```
+
+
+# supply zone k
+
+```{r}
+pastAndFutureGenSitesK = pastAndFutureGenSites %>% 
+  filter(Zone == 'K')
+
+  pastAndFutureGenSitesK$cumNPR_MW = cumsum(pastAndFutureGenSitesK$NPR_MW)
+  pastAndFutureGenSitesK$cumSummer = cumsum(pastAndFutureGenSitesK$Sum)
+  pastAndFutureGenSitesK$cumWinter = cumsum(pastAndFutureGenSitesK$Win)
+  # now to find renewables
+  runningTotalNPR = 0
+  runningTotalSum = 0
+  runningTotalWin = 0
+  pastAndFutureGenSitesK$cumNPR_MW_Renewable = 0
+  pastAndFutureGenSitesK$cumSummer_Renewable = 0
+  pastAndFutureGenSitesK$cumWinter_Renewable = 0
+  for (i in 1:nrow(pastAndFutureGenSitesK)){
+    isRenewable = pastAndFutureGenSitesK[i, 11]
+    if (isRenewable == 'yes'){
+      runningTotalNPR = runningTotalNPR + pastAndFutureGenSitesK[i,5]
+      runningTotalSum = runningTotalSum + pastAndFutureGenSitesK[i,6]
+      runningTotalWin = runningTotalWin + pastAndFutureGenSitesK[i,7]
+    }
+    pastAndFutureGenSitesK[i, 16] <- paste(runningTotalNPR)
+    pastAndFutureGenSitesK[i, 17] <- paste(runningTotalSum)
+    pastAndFutureGenSitesK[i, 18] <- paste(runningTotalWin)
+  }
+  pastAndFutureGenSitesK$cumNPR_MW_Renewable = as.numeric(pastAndFutureGenSitesK$cumNPR_MW_Renewable)
+  pastAndFutureGenSitesK$cumSummer_Renewable = as.numeric(pastAndFutureGenSitesK$cumSummer_Renewable)
+  pastAndFutureGenSitesK$cumWinter_Renewable = as.numeric(pastAndFutureGenSitesK$cumWinter_Renewable)
+  
+  pastAndFutureGenSitesK$cumNPR_MW_NonRenewable = pastAndFutureGenSitesK$cumNPR_MW - pastAndFutureGenSitesK$cumNPR_MW_Renewable
+  pastAndFutureGenSitesK$cumSummer_NonRenewable = pastAndFutureGenSitesK$cumSummer - pastAndFutureGenSitesK$cumSummer_Renewable
+  pastAndFutureGenSitesK$cumWinter_NonRenewable = pastAndFutureGenSitesK$cumWinter - pastAndFutureGenSitesK$cumWinter_Renewable
+  
+  dateVec = seq.Date(from = as.Date('1902/01/01'), to = as.Date('2030/12/01'), by = 'month')
+  dateVec
+  dateVec = ymd(dateVec)
+  dateVecYear = year(dateVec)
+  dateVecYear
+  dateVecMonth = month(dateVec)
+  dateVecMonth
+  zoneFutures = data.frame(dateVecYear,dateVecMonth)
+  names(zoneFutures) = c('Year', 'Month')
+  zoneFutures$Date = with(zoneFutures, sprintf('%d-%02d', Year, Month))
+  zoneFutures$Date
+  
+  pastAndFutureGenSitesK = pastAndFutureGenSitesK %>% 
+    select(dateDates,cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  names(pastAndFutureGenSitesK)[1] = ('Date')
+  
+  pastAndFutureGenSitesK = zoneFutures %>% 
+    left_join(pastAndFutureGenSitesK)
+  
+  pastAndFutureGenSitesK = pastAndFutureGenSitesK %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable)
+  pastAndFutureGenSitesK = pastAndFutureGenSitesK %>% fill(cumNPR_MW,cumSummer,cumWinter,cumNPR_MW_Renewable,cumSummer_Renewable,cumWinter_Renewable,cumNPR_MW_NonRenewable,cumSummer_NonRenewable, cumWinter_NonRenewable, .direction = 'up')
+  
+  pastAndFutureGenSitesK$Year = NULL
+  pastAndFutureGenSitesK$Month = NULL
+  pastAndFutureGenSitesK$Zone = 'K'
+  
+   pastAndFutureGenSitesK = pastAndFutureGenSitesK %>% 
+    group_by(Date) %>% 
+    summarise(cumNPR_MW = max(cumNPR_MW),cumSummer = max(cumSummer),cumWinter = max(cumWinter),cumNPR_MW_Renewable = max(cumNPR_MW_Renewable),cumSummer_Renewable = max(cumSummer_Renewable),cumWinter_Renewable = max(cumWinter_Renewable),cumNPR_MW_NonRenewable = max(cumNPR_MW_NonRenewable),cumSummer_NonRenewable = max(cumSummer_NonRenewable), cumWinter_NonRenewable = max(cumWinter_NonRenewable), zone = 'K')
+  pastAndFutureGenSitesK$DateTime = dateVec
+  pastAndFutureGenSitesK = pastAndFutureGenSitesK %>% 
+    filter(DateTime >= as.Date('2011-11-01'))
 ```
 
 
@@ -2425,6 +3224,140 @@ checkresiduals(arimaMonthlyMaxTempK)
 checkresiduals(arimaMonthlyCumeLoadKlog)
 checkresiduals(arimaMonthlyPeakLoadKlog)
 ```
+
+# combining the supply side datasets
+
+```{r}
+pastAndFutureGenSitesSeries = rbind(pastAndFutureGenSitesA, pastAndFutureGenSitesB)
+pastAndFutureGenSitesSeries = rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesC)
+pastAndFutureGenSitesSeries = rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesD)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesE)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesF)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesG)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesH)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesI)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesJ)
+pastAndFutureGenSitesSeries =rbind(pastAndFutureGenSitesSeries, pastAndFutureGenSitesK)
+pastAndFutureGenSitesSeries 
+```
+
+# combining the demand side datasets
+
+```{r}
+zoneAPastAndFuture$zone = 'A'
+zoneAPastAndFuture$Date = pastAndFutureGenSitesA$Date
+names(zoneAPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneAPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneAPastAndFuture$monthlyLoadPeaks = as.numeric(zoneAPastAndFuture$monthlyLoadPeaks)
+zoneAPastAndFuture$monthlySummativeLoads = as.numeric(zoneAPastAndFuture$monthlySummativeLoads)
+zoneAPastAndFuture$avgMaxTemps = as.numeric(zoneAPastAndFuture$avgMaxTemps)
+
+zoneBPastAndFuture$zone = 'B'
+zoneBPastAndFuture$Date = pastAndFutureGenSitesB$Date
+names(zoneBPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneBPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneBPastAndFuture$monthlyLoadPeaks = as.numeric(zoneBPastAndFuture$monthlyLoadPeaks)
+zoneBPastAndFuture$monthlySummativeLoads = as.numeric(zoneBPastAndFuture$monthlySummativeLoads)
+zoneBPastAndFuture$avgMaxTemps = as.numeric(zoneBPastAndFuture$avgMaxTemps)
+
+zoneCPastAndFuture$zone = 'C'
+zoneCPastAndFuture$Date = pastAndFutureGenSitesC$Date
+names(zoneCPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneCPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneCPastAndFuture$monthlyLoadPeaks = as.numeric(zoneCPastAndFuture$monthlyLoadPeaks)
+zoneCPastAndFuture$monthlySummativeLoads = as.numeric(zoneCPastAndFuture$monthlySummativeLoads)
+zoneCPastAndFuture$avgMaxTemps = as.numeric(zoneCPastAndFuture$avgMaxTemps)
+
+zoneDPastAndFuture$zone = 'D'
+zoneDPastAndFuture$Date = pastAndFutureGenSitesD$Date
+names(zoneDPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneDPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneDPastAndFuture$monthlyLoadPeaks = as.numeric(zoneDPastAndFuture$monthlyLoadPeaks)
+zoneDPastAndFuture$monthlySummativeLoads = as.numeric(zoneDPastAndFuture$monthlySummativeLoads)
+zoneDPastAndFuture$avgMaxTemps = as.numeric(zoneDPastAndFuture$avgMaxTemps)
+
+zoneEPastAndFuture$zone = 'E'
+zoneEPastAndFuture$Date = pastAndFutureGenSitesE$Date
+names(zoneEPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneEPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneEPastAndFuture$monthlyLoadPeaks = as.numeric(zoneEPastAndFuture$monthlyLoadPeaks)
+zoneEPastAndFuture$monthlySummativeLoads = as.numeric(zoneEPastAndFuture$monthlySummativeLoads)
+zoneEPastAndFuture$avgMaxTemps = as.numeric(zoneEPastAndFuture$avgMaxTemps)
+
+zoneFPastAndFuture$zone = 'F'
+zoneFPastAndFuture$Date = pastAndFutureGenSitesF$Date
+names(zoneFPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneFPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneFPastAndFuture$monthlyLoadPeaks = as.numeric(zoneFPastAndFuture$monthlyLoadPeaks)
+zoneFPastAndFuture$monthlySummativeLoads = as.numeric(zoneFPastAndFuture$monthlySummativeLoads)
+zoneFPastAndFuture$avgMaxTemps = as.numeric(zoneFPastAndFuture$avgMaxTemps)
+
+zoneGPastAndFuture$zone = 'G'
+zoneGPastAndFuture$Date = pastAndFutureGenSitesG$Date
+names(zoneGPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneGPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneGPastAndFuture$monthlyLoadPeaks = as.numeric(zoneGPastAndFuture$monthlyLoadPeaks)
+zoneGPastAndFuture$monthlySummativeLoads = as.numeric(zoneGPastAndFuture$monthlySummativeLoads)
+zoneGPastAndFuture$avgMaxTemps = as.numeric(zoneGPastAndFuture$avgMaxTemps)
+
+zoneHPastAndFuture$zone = 'H'
+zoneHPastAndFuture$Date = pastAndFutureGenSitesH$Date
+names(zoneHPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneHPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneHPastAndFuture$monthlyLoadPeaks = as.numeric(zoneHPastAndFuture$monthlyLoadPeaks)
+zoneHPastAndFuture$monthlySummativeLoads = as.numeric(zoneHPastAndFuture$monthlySummativeLoads)
+zoneHPastAndFuture$avgMaxTemps = as.numeric(zoneHPastAndFuture$avgMaxTemps)
+
+zoneIPastAndFuture$zone = 'I'
+zoneIPastAndFuture$Date = pastAndFutureGenSitesI$Date
+names(zoneIPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneIPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneIPastAndFuture$monthlyLoadPeaks = as.numeric(zoneIPastAndFuture$monthlyLoadPeaks)
+zoneIPastAndFuture$monthlySummativeLoads = as.numeric(zoneIPastAndFuture$monthlySummativeLoads)
+zoneIPastAndFuture$avgMaxTemps = as.numeric(zoneIPastAndFuture$avgMaxTemps)
+
+zoneJPastAndFuture$zone = 'J'
+zoneJPastAndFuture$Date = pastAndFutureGenSitesJ$Date
+names(zoneJPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneJPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneJPastAndFuture$monthlyLoadPeaks = as.numeric(zoneJPastAndFuture$monthlyLoadPeaks)
+zoneJPastAndFuture$monthlySummativeLoads = as.numeric(zoneJPastAndFuture$monthlySummativeLoads)
+zoneJPastAndFuture$avgMaxTemps = as.numeric(zoneJPastAndFuture$avgMaxTemps)
+
+zoneKPastAndFuture$zone = 'K'
+zoneKPastAndFuture$Date = pastAndFutureGenSitesK$Date
+names(zoneKPastAndFuture)[1] = ('monthlyLoadPeaks')
+names(zoneKPastAndFuture)[2] = ('monthlySummativeLoads')
+zoneKPastAndFuture$monthlyLoadPeaks = as.numeric(zoneKPastAndFuture$monthlyLoadPeaks)
+zoneKPastAndFuture$monthlySummativeLoads = as.numeric(zoneKPastAndFuture$monthlySummativeLoads)
+zoneKPastAndFuture$avgMaxTemps = as.numeric(zoneKPastAndFuture$avgMaxTemps)
+```
+
+```{r}
+pastAndFutureDemandSiteSeries = rbind(zoneAPastAndFuture, zoneBPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneCPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneDPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneEPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneFPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneGPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneHPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneIPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneJPastAndFuture)
+pastAndFutureDemandSiteSeries = rbind(pastAndFutureDemandSiteSeries, zoneKPastAndFuture)
+```
+
+# finally, combining the future demand and supply forecasts from 2011-2030
+
+```{r}
+supplyAndDemand2011To2030 = pastAndFutureDemandSiteSeries %>% 
+  left_join(pastAndFutureGenSitesSeries)
+
+# adding a upstate vs downstate column
+supplyAndDemand2011To2030 = supplyAndDemand2011To2030 %>% 
+  left_join(upstateKey, by = c('zone' = 'Abbrv_zone'))
+write.csv(supplyAndDemand2011To2030, file = 'supplyAndDemand2011To2030.csv')
+```
+
 
 # let's try using facebook's prophet library which can work on sub-daily data
 
